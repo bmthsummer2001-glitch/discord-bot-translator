@@ -155,6 +155,22 @@ Save stamina and prep squads in advance!`;
   }
 }
 
+async function postBauxiteReminder() {
+  if (!DAILY_CHANNEL_ID) {
+    console.log('No DAILY_CHANNEL_ID set, skipping bauxite reminder');
+    return;
+  }
+  try {
+    const reminder = TBV_ROLE + `
+⏲️ You can now start pre-gathering a level 11 bauxite mine`;
+    const ch = await client.channels.fetch(DAILY_CHANNEL_ID);
+    await ch.send(reminder);
+    console.log('Bauxite reminder posted');
+  } catch (err) {
+    console.error('Failed to post bauxite reminder:', err.message);
+  }
+}
+
 client.once('ready', async (c) => {
   botUserId = c.user.id;
   console.log('Bot online:', c.user.tag);
@@ -173,6 +189,12 @@ client.once('ready', async (c) => {
     postZombieRaidReminder();
   }, { timezone: 'America/New_York' });
   console.log('Zombie raid reminder cron job set for 12:00 PM ET on Tuesdays');
+
+  cron.schedule('30 4 * * 0', () => {
+    console.log('Posting bauxite reminder...');
+    postBauxiteReminder();
+  }, { timezone: 'America/New_York' });
+  console.log('Bauxite reminder cron job set for 4:30 AM ET on Sundays');
 });
 
 client.on('messageCreate', async (msg) => {
