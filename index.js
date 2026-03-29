@@ -94,6 +94,8 @@ Primary Focus:
 • Reinforce alliance members under attack`
 };
 
+let botUserId = null;
+
 const client = new Client({
   intents: [
     GatewayIntentBits.Guilds,
@@ -132,6 +134,7 @@ async function postDailySchedule() {
 }
 
 client.once('ready', async (c) => {
+  botUserId = c.user.id;
   console.log('Bot online:', c.user.tag);
   const rest = new REST().setToken(TOKEN);
   await rest.put(Routes.applicationCommands(c.user.id), { body: commands });
@@ -146,7 +149,7 @@ client.once('ready', async (c) => {
 });
 
 client.on('messageCreate', async (msg) => {
-  if (msg.author.bot) return;
+  if (msg.author.bot || msg.author.id === botUserId) return;
 
   // Leadership → German & Slovak
   if (msg.channelId === LEADERSHIP) {
