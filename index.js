@@ -34,13 +34,11 @@ Bauxite mines ⏲️
 • Level 9: 18:30 GT
 • Level 10: 12:30 GT
 • Level 11: 06:30 GT`,
-
   1: `🔷 MONDAY – Gathering day
 Starts at 00:30 GT
 
 • Make sure not to recall trucks before 00:30 GT
 • Gathering all day`,
-
   2: `🔷 TUESDAY – Base Upgrades
 Starts at: 00:30 GT
 
@@ -54,7 +52,6 @@ Primary Focus:
 • 2nd Raid: 20:00 GT
 
 Save stamina and prep squads in advance.`,
-
   3: `🔷 WEDNESDAY – Research day
 Starts at 00:30 GT
 
@@ -66,12 +63,10 @@ Primary Focus ~ Research new technologies in the Tech Center:
 ⏱️ Timing Tips:
 • Start long builds before reset
 • Finish research after reset for Ad Duel points`,
-
   4: `🔷 THURSDAY – Recruitment day
 Starts at: 00:30 GT
 
 • Hero recruitment`,
-
   5: `🔷 FRIDAY – Training day
 Starts at 00:30 GT
 
@@ -84,7 +79,6 @@ Primary Focus:
 • Start long training queues before reset
 • Use speedups after reset for Ad Duel points
 • Stack training buffs if available`,
-
   6: `🔷 SATURDAY – Enemy Elimination Day (EE)
 Starts at Reset: 00:30 GT
 
@@ -153,30 +147,64 @@ client.once('ready', async (c) => {
 
 client.on('messageCreate', async (msg) => {
   if (msg.author.bot) return;
-  if (msg.channelId !== LEADERSHIP) return;
 
-  console.log('Translating message from', msg.author.username);
-  const author = msg.member?.displayName || msg.author.username;
-  const header = '📢 **' + author + '** (Leadership):';
+  // Leadership → German & Slovak
+  if (msg.channelId === LEADERSHIP) {
+    console.log('Translating Leadership message from', msg.author.username);
+    const author = msg.member?.displayName || msg.author.username;
+    const header = '📢 **' + author + '** (Leadership):';
 
-  try {
-    const [de, sk] = await Promise.all([
-      GERMAN ? translate(msg.content, 'de') : Promise.resolve(''),
-      SLOVAK ? translate(msg.content, 'sk') : Promise.resolve('')
-    ]);
+    try {
+      const [de, sk] = await Promise.all([
+        GERMAN ? translate(msg.content, 'de') : Promise.resolve(''),
+        SLOVAK ? translate(msg.content, 'sk') : Promise.resolve('')
+      ]);
 
-    if (GERMAN) {
-      const ch = await client.channels.fetch(GERMAN);
-      await ch.send(header + '\n' + de);
+      if (GERMAN) {
+        const ch = await client.channels.fetch(GERMAN);
+        await ch.send(header + '\n' + de);
+      }
+      if (SLOVAK) {
+        const ch = await client.channels.fetch(SLOVAK);
+        await ch.send(header + '\n' + sk);
+      }
+
+      console.log('Translations posted successfully');
+    } catch (err) {
+      console.error('Translation error:', err.message);
     }
-    if (SLOVAK) {
-      const ch = await client.channels.fetch(SLOVAK);
-      await ch.send(header + '\n' + sk);
-    }
+  }
 
-    console.log('Translations posted successfully');
-  } catch (err) {
-    console.error('Translation error:', err.message);
+  // German → English back to Leadership
+  if (msg.channelId === GERMAN) {
+    console.log('Translating German message from', msg.author.username);
+    const author = msg.member?.displayName || msg.author.username;
+    const header = '🇩🇪 **' + author + '** (German):';
+
+    try {
+      const en = await translate(msg.content, 'en');
+      const ch = await client.channels.fetch(LEADERSHIP);
+      await ch.send(header + '\n' + en);
+      console.log('German → English translation posted');
+    } catch (err) {
+      console.error('Translation error:', err.message);
+    }
+  }
+
+  // Slovak → English back to Leadership
+  if (msg.channelId === SLOVAK) {
+    console.log('Translating Slovak message from', msg.author.username);
+    const author = msg.member?.displayName || msg.author.username;
+    const header = '🇸🇰 **' + author + '** (Slovak):';
+
+    try {
+      const en = await translate(msg.content, 'en');
+      const ch = await client.channels.fetch(LEADERSHIP);
+      await ch.send(header + '\n' + en);
+      console.log('Slovak → English translation posted');
+    } catch (err) {
+      console.error('Translation error:', err.message);
+    }
   }
 });
 
