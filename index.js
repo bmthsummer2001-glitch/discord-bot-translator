@@ -6,6 +6,7 @@ const LEADERSHIP = process.env.LEADERSHIP_CHANNEL_ID;
 const GERMAN = process.env.GERMAN_CHANNEL_ID;
 const SLOVAK = process.env.SLOVAK_CHANNEL_ID;
 const DAILY_CHANNEL_ID = process.env.DAILY_CHANNEL_ID;
+const TBV_ROLE = '<@&1318114945149173825>';
 
 if (!TOKEN) {
   console.error('Missing DISCORD_BOT_TOKEN');
@@ -129,7 +130,7 @@ async function postDailySchedule() {
     const nextDay = (currentDay + 1) % 7;
     const message = DAILY_MESSAGES[nextDay];
     const ch = await client.channels.fetch(DAILY_CHANNEL_ID);
-    await ch.send('@everyone\n' + message);
+    await ch.send(TBV_ROLE + '\n' + message);
     console.log('Daily schedule posted for game day', nextDay);
   } catch (err) {
     console.error('Failed to post daily schedule:', err.message);
