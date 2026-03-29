@@ -161,8 +161,7 @@ async function postLevel11Bauxite() {
     return;
   }
   try {
-    const reminder = TBV_ROLE + `
-⛏️ You can now start pre-gathering a level 11 bauxite mine`;
+    const reminder = `⛏️ You can now start pre-gathering a level 11 bauxite mine`;
     const ch = await client.channels.fetch(DAILY_CHANNEL_ID);
     await ch.send(reminder);
     console.log('Level 11 bauxite reminder posted');
@@ -177,8 +176,7 @@ async function postLevel10Bauxite() {
     return;
   }
   try {
-    const reminder = TBV_ROLE + `
-⛏️ You can now start pre-gathering a level 10 bauxite mine`;
+    const reminder = `⛏️ You can now start pre-gathering a level 10 bauxite mine`;
     const ch = await client.channels.fetch(DAILY_CHANNEL_ID);
     await ch.send(reminder);
     console.log('Level 10 bauxite reminder posted');
@@ -193,8 +191,7 @@ async function postLevel9Bauxite() {
     return;
   }
   try {
-    const reminder = TBV_ROLE + `
-⛏️ You can now start pre-gathering a level 9 bauxite mine`;
+    const reminder = `⛏️ You can now start pre-gathering a level 9 bauxite mine`;
     const ch = await client.channels.fetch(DAILY_CHANNEL_ID);
     await ch.send(reminder);
     console.log('Level 9 bauxite reminder posted');
