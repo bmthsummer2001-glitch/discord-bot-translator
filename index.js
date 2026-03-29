@@ -178,33 +178,55 @@ client.on('messageCreate', async (msg) => {
     }
   }
 
-  // German → English back to Leadership
+  // German → English to Leadership + Slovak translation
   if (msg.channelId === GERMAN) {
     console.log('Translating German message from', msg.author.username);
     const author = msg.member?.displayName || msg.author.username;
-    const header = '🇩🇪 **' + author + '** (German):';
+    const headerEn = '🇩🇪 **' + author + '** (German):';
+    const headerSk = '🇩🇪 **' + author + '** (German → Slovak):';
 
     try {
-      const en = await translate(msg.content, 'en');
-      const ch = await client.channels.fetch(LEADERSHIP);
-      await ch.send(header + '\n' + en);
-      console.log('German → English translation posted');
+      const [en, sk] = await Promise.all([
+        translate(msg.content, 'en'),
+        SLOVAK ? translate(msg.content, 'sk') : Promise.resolve('')
+      ]);
+
+      const leadershipCh = await client.channels.fetch(LEADERSHIP);
+      await leadershipCh.send(headerEn + '\n' + en);
+
+      if (SLOVAK) {
+        const slovakCh = await client.channels.fetch(SLOVAK);
+        await slovakCh.send(headerSk + '\n' + sk);
+      }
+
+      console.log('German message posted to Leadership and Slovak');
     } catch (err) {
       console.error('Translation error:', err.message);
     }
   }
 
-  // Slovak → English back to Leadership
+  // Slovak → English to Leadership + German translation
   if (msg.channelId === SLOVAK) {
     console.log('Translating Slovak message from', msg.author.username);
     const author = msg.member?.displayName || msg.author.username;
-    const header = '🇸🇰 **' + author + '** (Slovak):';
+    const headerEn = '🇸🇰 **' + author + '** (Slovak):';
+    const headerDe = '🇸🇰 **' + author + '** (Slovak → German):';
 
     try {
-      const en = await translate(msg.content, 'en');
-      const ch = await client.channels.fetch(LEADERSHIP);
-      await ch.send(header + '\n' + en);
-      console.log('Slovak → English translation posted');
+      const [en, de] = await Promise.all([
+        translate(msg.content, 'en'),
+        GERMAN ? translate(msg.content, 'de') : Promise.resolve('')
+      ]);
+
+      const leadershipCh = await client.channels.fetch(LEADERSHIP);
+      await leadershipCh.send(headerEn + '\n' + en);
+
+      if (GERMAN) {
+        const germanCh = await client.channels.fetch(GERMAN);
+        await germanCh.send(headerDe + '\n' + de);
+      }
+
+      console.log('Slovak message posted to Leadership and German');
     } catch (err) {
       console.error('Translation error:', err.message);
     }
