@@ -165,16 +165,14 @@ client.on('messageCreate', async (msg) => {
 
       if (GERMAN) {
         const ch = await client.channels.fetch(GERMAN);
-        const m = await ch.send(header + '\n' + de);
-        await m.react('🇩🇪');
+        await ch.send(header + '\n' + de);
       }
       if (SLOVAK) {
         const ch = await client.channels.fetch(SLOVAK);
-        const m = await ch.send(header + '\n' + sk);
-        await m.react('🇸🇰');
+        await ch.send(header + '\n' + sk);
       }
 
-      console.log('Translations posted with reactions');
+      console.log('Translations posted successfully');
     } catch (err) {
       console.error('Translation error:', err.message);
     }
@@ -189,9 +187,8 @@ client.on('messageCreate', async (msg) => {
     try {
       const en = await translate(msg.content, 'en');
       const ch = await client.channels.fetch(LEADERSHIP);
-      const m = await ch.send(header + '\n' + en);
-      await m.react('🇬🇧');
-      console.log('German → English translation posted with reaction');
+      await ch.send(header + '\n' + en);
+      console.log('German → English translation posted');
     } catch (err) {
       console.error('Translation error:', err.message);
     }
@@ -206,9 +203,8 @@ client.on('messageCreate', async (msg) => {
     try {
       const en = await translate(msg.content, 'en');
       const ch = await client.channels.fetch(LEADERSHIP);
-      const m = await ch.send(header + '\n' + en);
-      await m.react('🇬🇧');
-      console.log('Slovak → English translation posted with reaction');
+      await ch.send(header + '\n' + en);
+      console.log('Slovak → English translation posted');
     } catch (err) {
       console.error('Translation error:', err.message);
     }
