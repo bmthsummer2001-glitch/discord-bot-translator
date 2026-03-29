@@ -155,19 +155,51 @@ Save stamina and prep squads in advance!`;
   }
 }
 
-async function postBauxiteReminder() {
+async function postLevel11Bauxite() {
   if (!DAILY_CHANNEL_ID) {
-    console.log('No DAILY_CHANNEL_ID set, skipping bauxite reminder');
+    console.log('No DAILY_CHANNEL_ID set, skipping level 11 bauxite reminder');
     return;
   }
   try {
     const reminder = TBV_ROLE + `
-⏲️ You can now start pre-gathering a level 11 bauxite mine`;
+⛏️ You can now start pre-gathering a level 11 bauxite mine`;
     const ch = await client.channels.fetch(DAILY_CHANNEL_ID);
     await ch.send(reminder);
-    console.log('Bauxite reminder posted');
+    console.log('Level 11 bauxite reminder posted');
   } catch (err) {
-    console.error('Failed to post bauxite reminder:', err.message);
+    console.error('Failed to post level 11 bauxite reminder:', err.message);
+  }
+}
+
+async function postLevel10Bauxite() {
+  if (!DAILY_CHANNEL_ID) {
+    console.log('No DAILY_CHANNEL_ID set, skipping level 10 bauxite reminder');
+    return;
+  }
+  try {
+    const reminder = TBV_ROLE + `
+⛏️ You can now start pre-gathering a level 10 bauxite mine`;
+    const ch = await client.channels.fetch(DAILY_CHANNEL_ID);
+    await ch.send(reminder);
+    console.log('Level 10 bauxite reminder posted');
+  } catch (err) {
+    console.error('Failed to post level 10 bauxite reminder:', err.message);
+  }
+}
+
+async function postLevel9Bauxite() {
+  if (!DAILY_CHANNEL_ID) {
+    console.log('No DAILY_CHANNEL_ID set, skipping level 9 bauxite reminder');
+    return;
+  }
+  try {
+    const reminder = TBV_ROLE + `
+⛏️ You can now start pre-gathering a level 9 bauxite mine`;
+    const ch = await client.channels.fetch(DAILY_CHANNEL_ID);
+    await ch.send(reminder);
+    console.log('Level 9 bauxite reminder posted');
+  } catch (err) {
+    console.error('Failed to post level 9 bauxite reminder:', err.message);
   }
 }
 
@@ -191,10 +223,22 @@ client.once('ready', async (c) => {
   console.log('Zombie raid reminder cron job set for 12:00 PM ET on Tuesdays');
 
   cron.schedule('30 4 * * 0', () => {
-    console.log('Posting bauxite reminder...');
-    postBauxiteReminder();
+    console.log('Posting level 11 bauxite reminder...');
+    postLevel11Bauxite();
   }, { timezone: 'America/New_York' });
-  console.log('Bauxite reminder cron job set for 4:30 AM ET on Sundays');
+  console.log('Level 11 bauxite reminder cron job set for 4:30 AM ET on Sundays');
+
+  cron.schedule('30 10 * * 0', () => {
+    console.log('Posting level 10 bauxite reminder...');
+    postLevel10Bauxite();
+  }, { timezone: 'America/New_York' });
+  console.log('Level 10 bauxite reminder cron job set for 10:30 AM ET on Sundays');
+
+  cron.schedule('30 16 * * 0', () => {
+    console.log('Posting level 9 bauxite reminder...');
+    postLevel9Bauxite();
+  }, { timezone: 'America/New_York' });
+  console.log('Level 9 bauxite reminder cron job set for 4:30 PM ET on Sundays');
 });
 
 client.on('messageCreate', async (msg) => {
