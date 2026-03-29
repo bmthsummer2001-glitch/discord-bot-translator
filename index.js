@@ -133,6 +133,28 @@ async function postDailySchedule() {
   }
 }
 
+async function postZombieRaidReminder() {
+  if (!DAILY_CHANNEL_ID) {
+    console.log('No DAILY_CHANNEL_ID set, skipping zombie raid reminder');
+    return;
+  }
+  try {
+    const reminder = TBV_ROLE + `
+⚔️ ZOMBIE RAID REMINDER – TODAY!
+
+Back-to-Back Zombie Raids:
+• 1st Raid: 18:00 GT
+• 2nd Raid: 20:00 GT
+
+Save stamina and prep squads in advance!`;
+    const ch = await client.channels.fetch(DAILY_CHANNEL_ID);
+    await ch.send(reminder);
+    console.log('Zombie raid reminder posted');
+  } catch (err) {
+    console.error('Failed to post zombie raid reminder:', err.message);
+  }
+}
+
 client.once('ready', async (c) => {
   botUserId = c.user.id;
   console.log('Bot online:', c.user.tag);
@@ -144,8 +166,13 @@ client.once('ready', async (c) => {
     console.log('Posting daily schedule...');
     postDailySchedule();
   }, { timezone: 'America/New_York' });
-
   console.log('Daily schedule cron job set for 10:00 PM ET');
+
+  cron.schedule('0 12 * * 2', () => {
+    console.log('Posting zombie raid reminder...');
+    postZombieRaidReminder();
+  }, { timezone: 'America/New_York' });
+  console.log('Zombie raid reminder cron job set for 12:00 PM ET on Tuesdays');
 });
 
 client.on('messageCreate', async (msg) => {
