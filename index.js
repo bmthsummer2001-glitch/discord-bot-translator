@@ -64,7 +64,7 @@ Primary Focus ~ Research new technologies in the Tech Center:
 • Start long builds before reset
 • Finish research after reset for Ad Duel points`,
   4: `🔷 THURSDAY – Recruitment day
-Starts at: 00:30 GT
+Starts at: 00:30 CT
 
 • Hero recruitment`,
   5: `🔷 FRIDAY – Training day
@@ -155,6 +155,23 @@ Save stamina and prep squads in advance!`;
   }
 }
 
+async function postSecondZombieRaidReminder() {
+  if (!DAILY_CHANNEL_ID) {
+    console.log('No DAILY_CHANNEL_ID set, skipping second zombie raid reminder');
+    return;
+  }
+  try {
+    const reminder = TBV_ROLE + `
+⚔️ Second Zombie Raid starts in 30 minutes!
+20:00 GT`;
+    const ch = await client.channels.fetch(DAILY_CHANNEL_ID);
+    await ch.send(reminder);
+    console.log('Second zombie raid reminder posted');
+  } catch (err) {
+    console.error('Failed to post second zombie raid reminder:', err.message);
+  }
+}
+
 async function postLevel11Bauxite() {
   if (!DAILY_CHANNEL_ID) {
     console.log('No DAILY_CHANNEL_ID set, skipping level 11 bauxite reminder');
@@ -218,6 +235,12 @@ client.once('ready', async (c) => {
     postZombieRaidReminder();
   }, { timezone: 'America/New_York' });
   console.log('Zombie raid reminder cron job set for 12:00 PM ET on Tuesdays');
+
+  cron.schedule('30 17 * * 2', () => {
+    console.log('Posting second zombie raid reminder...');
+    postSecondZombieRaidReminder();
+  }, { timezone: 'America/New_York' });
+  console.log('Second zombie raid reminder cron job set for 5:30 PM ET on Tuesdays');
 
   cron.schedule('30 4 * * 0', () => {
     console.log('Posting level 11 bauxite reminder...');
