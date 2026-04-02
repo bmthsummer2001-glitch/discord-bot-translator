@@ -217,6 +217,39 @@ async function postLevel9Bauxite() {
   }
 }
 
+
+async function postCityCaptureReminder() {
+  if (!DAILY_CHANNEL_ID) {
+    console.log('No DAILY_CHANNEL_ID set, skipping city capture reminder');
+    return;
+  }
+  try {
+    const reminder = TBV_ROLE + \`
+City Capture for mini tbv at 19:00 GT, 1 hour from now\`;
+    const ch = await client.channels.fetch(DAILY_CHANNEL_ID);
+    await ch.send(reminder);
+    console.log('City capture reminder posted');
+  } catch (err) {
+    console.error('Failed to post city capture reminder:', err.message);
+  }
+}
+
+async function postCityCaptureStartReminder() {
+  if (!DAILY_CHANNEL_ID) {
+    console.log('No DAILY_CHANNEL_ID set, skipping city capture start reminder');
+    return;
+  }
+  try {
+    const reminder = TBV_ROLE + \`
+City Capture for mini tbv starts in 30 minutes. No repairs!\`;
+    const ch = await client.channels.fetch(DAILY_CHANNEL_ID);
+    await ch.send(reminder);
+    console.log('City capture start reminder posted');
+  } catch (err) {
+    console.error('Failed to post city capture start reminder:', err.message);
+  }
+}
+
 client.once('ready', async (c) => {
   botUserId = c.user.id;
   console.log('Bot online:', c.user.tag);
@@ -259,6 +292,18 @@ client.once('ready', async (c) => {
     postLevel9Bauxite();
   }, { timezone: 'America/New_York' });
   console.log('Level 9 bauxite reminder cron job set for 4:30 PM ET on Sundays');
+  cron.schedule('0 16 * * 1-5', () => {
+    console.log('Posting city capture reminder...');
+    postCityCaptureReminder();
+  }, { timezone: 'America/New_York' });
+  console.log('City capture reminder cron job set for 4:00 PM ET Monday-Friday');
+
+  cron.schedule('30 16 * * 1-5', () => {
+    console.log('Posting city capture start reminder...');
+    postCityCaptureStartReminder();
+  }, { timezone: 'America/New_York' });
+  console.log('City capture start reminder cron job set for 4:30 PM ET Monday-Friday');
+
 });
 
 client.on('messageCreate', async (msg) => {
