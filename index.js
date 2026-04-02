@@ -259,6 +259,35 @@ async function postCityCaptureStartReminder() {
   }
 }
 
+
+async function scheduleOneTimeAnnouncement() {
+  if (!DAILY_CHANNEL_ID) {
+    console.log('No DAILY_CHANNEL_ID set, skipping one-time announcement');
+    return;
+  }
+  const now = new Date();
+  const targetTime = new Date();
+  targetTime.setHours(16, 30, 0, 0);
+  const estOffset = new Date().toLocaleString('en-US', { timeZone: 'America/New_York' });
+  const estDate = new Date(estOffset);
+  targetTime.setFullYear(estDate.getFullYear(), estDate.getMonth(), estDate.getDate());
+  
+  if (targetTime > now) {
+    const delay = targetTime - now;
+    setTimeout(async () => {
+      try {
+        const msg = TBV_ROLE + '\nHelping tbv cap a city in 30 minutes. 19:00 GT';
+        const ch = await client.channels.fetch(DAILY_CHANNEL_ID);
+        await ch.send(msg);
+        console.log('One-time announcement posted');
+      } catch (err) {
+        console.error('Failed to post one-time announcement:', err.message);
+      }
+    }, delay);
+    console.log('One-time announcement scheduled for 4:30 PM ET today');
+  }
+}
+
 client.once('ready', async (c) => {
   botUserId = c.user.id;
   console.log('Bot online:', c.user.tag);
