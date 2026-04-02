@@ -217,5 +217,158 @@ async function postLevel9Bauxite() {
   }
 }
 
-
 client.once('ready', async (c) => {
+  botUserId = c.user.id;
+  console.log('Bot online:', c.user.tag);
+  const rest = new REST().setToken(TOKEN);
+  await rest.put(Routes.applicationCommands(c.user.id), { body: commands });
+  console.log('Slash commands registered');
+
+  cron.schedule('0 22 * * *', () => {
+    console.log('Posting daily schedule...');
+    postDailySchedule();
+  }, { timezone: 'America/New_York' });
+  console.log('Daily schedule cron job set for 10:00 PM ET');
+
+  cron.schedule('0 12 * * 2', () => {
+    console.log('Posting zombie raid reminder...');
+    postZombieRaidReminder();
+  }, { timezone: 'America/New_York' });
+  console.log('Zombie raid reminder cron job set for 12:00 PM ET on Tuesdays');
+
+  cron.schedule('30 17 * * 2', () => {
+    console.log('Posting second zombie raid reminder...');
+    postSecondZombieRaidReminder();
+  }, { timezone: 'America/New_York' });
+  console.log('Second zombie raid reminder cron job set for 5:30 PM ET on Tuesdays');
+
+  cron.schedule('30 4 * * 0', () => {
+    console.log('Posting level 11 bauxite reminder...');
+    postLevel11Bauxite();
+  }, { timezone: 'America/New_York' });
+  console.log('Level 11 bauxite reminder cron job set for 4:30 AM ET on Sundays');
+
+  cron.schedule('30 10 * * 0', () => {
+    console.log('Posting level 10 bauxite reminder...');
+    postLevel10Bauxite();
+  }, { timezone: 'America/New_York' });
+  console.log('Level 10 bauxite reminder cron job set for 10:30 AM ET on Sundays');
+
+  cron.schedule('30 16 * * 0', () => {
+    console.log('Posting level 9 bauxite reminder...');
+    postLevel9Bauxite();
+  }, { timezone: 'America/New_York' });
+  console.log('Level 9 bauxite reminder cron job set for 4:30 PM ET on Sundays');
+});
+
+client.on('messageCreate', async (msg) => {
+  if (msg.author.bot || msg.author.id === botUserId) return;
+
+  // Leadership → German & Slovak
+  if (msg.channelId === LEADERSHIP) {
+    console.log('Translating Leadership message from', msg.author.username);
+    const author = msg.member?.displayName || msg.author.username;
+    const header = '📢 **' + author + '** (Leadership):';
+
+    try {
+      const [de, sk] = await Promise.all([
+        GERMAN ? translate(msg.content, 'de') : Promise.resolve(''),
+        SLOVAK ? translate(msg.content, 'sk') : Promise.resolve('')
+      ]);
+
+      if (GERMAN) {
+        const ch = await client.channels.fetch(GERMAN);
+        await ch.send(header + '\n' + de);
+      }
+      if (SLOVAK) {
+        const ch = await client.channels.fetch(SLOVAK);
+        await ch.send(header + '\n' + sk);
+      }
+
+      console.log('Translations posted successfully');
+    } catch (err) {
+      console.error('Translation error:', err.message);
+    }
+  }
+
+  // German → English to Leadership + Slovak translation
+  if (msg.channelId === GERMAN) {
+    console.log('Translating German message from', msg.author.username);
+    const author = msg.member?.displayName || msg.author.username;
+    const headerEn = '🇩🇪 **' + author + '** (German):';
+    const headerSk = '🇩🇪 **' + author + '** (German → Slovak):';
+
+    try {
+      const [en, sk] = await Promise.all([
+        translate(msg.content, 'en'),
+        SLOVAK ? translate(msg.content, 'sk') : Promise.resolve('')
+      ]);
+
+      const leadershipCh = await client.channels.fetch(LEADERSHIP);
+      await leadershipCh.send(headerEn + '\n' + en);
+
+      if (SLOVAK) {
+        const slovakCh = await client.channels.fetch(SLOVAK);
+        await slovakCh.send(headerSk + '\n' + sk);
+      }
+
+      console.log('German message posted to Leadership and Slovak');
+    } catch (err) {
+      console.error('Translation error:', err.message);
+    }
+  }
+
+  // Slovak → English to Leadership + German translation
+  if (msg.channelId === SLOVAK) {
+    console.log('Translating Slovak message from', msg.author.username);
+    const author = msg.member?.displayName || msg.author.username;
+    const headerEn = '🇸🇰 **' + author + '** (Slovak):';
+    const headerDe = '🇸🇰 **' + author + '** (Slovak → German):';
+
+    try {
+      const [en, de] = await Promise.all([
+        translate(msg.content, 'en'),
+        GERMAN ? translate(msg.content, 'de') : Promise.resolve('')
+      ]);
+
+      const leadershipCh = await client.channels.fetch(LEADERSHIP);
+      await leadershipCh.send(headerEn + '\n' + en);
+
+      if (GERMAN) {
+        const germanCh = await client.channels.fetch(GERMAN);
+        await germanCh.send(headerDe + '\n' + de);
+      }
+
+      console.log('Slovak message posted to Leadership and German');
+    } catch (err) {
+      console.error('Translation error:', err.message);
+    }
+  }
+});
+
+client.on('interactionCreate', async (interaction) => {
+  if (!interaction.isChatInputCommand()) return;
+
+  if (interaction.commandName === 'ping') {
+    await interaction.reply('Pong! Bot is online and running.');
+  } else if (interaction.commandName === 'help') {
+    await interaction.reply('Commands:\n/ping - Check status\n/today - Show todays game schedule\n/translate <text> - Translate to German and Slovak\n/help - Show this message');
+  } else if (interaction.commandName === 'today') {
+    const now = new Date(new Date().toLocaleString('en-US', { timeZone: 'America/New_York' }));
+    const currentDay = now.getDay();
+    const nextDay = (currentDay + 1) % 7;
+    const message = DAILY_MESSAGES[nextDay];
+    await interaction.reply('**Current game day schedule:**\n\n' + message);
+  } else if (interaction.commandName === 'translate') {
+    await interaction.deferReply();
+    const text = interaction.options.getString('text', true);
+    try {
+      const [de, sk] = await Promise.all([translate(text, 'de'), translate(text, 'sk')]);
+      await interaction.editReply('**Original:** ' + text + '\n🇩🇪 **German:** ' + de + '\n🇸🇰 **Slovak:** ' + sk);
+    } catch (err) {
+      await interaction.editReply('Translation failed. Please try again.');
+    }
+  }
+});
+
+client.login(TOKEN);
