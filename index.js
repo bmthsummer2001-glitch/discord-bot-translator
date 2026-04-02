@@ -259,12 +259,6 @@ async function postCityCaptureStartReminder() {
   }
 }
 
-
-async function scheduleOneTimeAnnouncement() {
-  if (!DAILY_CHANNEL_ID) {
-    console.log('No DAILY_CHANNEL_ID set, skipping one-time announcement');
-    return;
-  }
   const now = new Date();
   const targetTime = new Date();
   targetTime.setHours(16, 30, 0, 0);
