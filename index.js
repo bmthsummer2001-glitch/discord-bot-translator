@@ -229,36 +229,6 @@ City Capture for mini tbv starts in 30 minutes. No repairs!\`;
 }
 
 
-async function postCityCaptureReminder() {
-  if (!DAILY_CHANNEL_ID) {
-    console.log('No DAILY_CHANNEL_ID set, skipping city capture reminder');
-    return;
-  }
-  try {
-    const msg = TBV_ROLE + '\nCity Capture for mini tbv at 19:00 GT, 1 hour from now';
-    const ch = await client.channels.fetch(DAILY_CHANNEL_ID);
-    await ch.send(msg);
-    console.log('City capture reminder posted');
-  } catch (err) {
-    console.error('Failed to post city capture reminder:', err.message);
-  }
-}
-
-async function postCityCaptureStartReminder() {
-  if (!DAILY_CHANNEL_ID) {
-    console.log('No DAILY_CHANNEL_ID set, skipping city capture start reminder');
-    return;
-  }
-  try {
-    const msg = TBV_ROLE + '\nCity Capture for mini tbv starts in 30 minutes. No repairs!';
-    const ch = await client.channels.fetch(DAILY_CHANNEL_ID);
-    await ch.send(msg);
-    console.log('City capture start reminder posted');
-  } catch (err) {
-    console.error('Failed to post city capture start reminder:', err.message);
-  }
-}
-
   const now = new Date();
   const targetTime = new Date();
   targetTime.setHours(16, 30, 0, 0);
