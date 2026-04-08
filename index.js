@@ -7,6 +7,17 @@ const GERMAN = process.env.GERMAN_CHANNEL_ID;
 const SLOVAK = process.env.SLOVAK_CHANNEL_ID;
 const DAILY_CHANNEL_ID = process.env.DAILY_CHANNEL_ID;
 const TBV_ROLE = '<@&1318114945149173825>';
+// Announcements channels
+const ANN_EN = process.env.ANN_EN_CHANNEL_ID;
+const ANN_DE = process.env.ANN_DE_CHANNEL_ID;
+const ANN_SK = process.env.ANN_SK_CHANNEL_ID;
+const ANN_FR = process.env.ANN_FR_CHANNEL_ID;
+
+// General chat channels
+const GEN_EN = process.env.GEN_EN_CHANNEL_ID;
+const GEN_DE = process.env.GEN_DE_CHANNEL_ID;
+const GEN_SK = process.env.GEN_SK_CHANNEL_ID;
+const GEN_FR = process.env.GEN_FR_CHANNEL_ID;
 
 if (!TOKEN) {
   console.error('Missing DISCORD_BOT_TOKEN');
