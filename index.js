@@ -355,6 +355,144 @@ client.on('messageCreate', async (msg) => {
       console.error('Translation error:', err.message);
     }
   }
+
+  // === ANNOUNCEMENTS GROUP ===
+  // ANN_EN -> DE, SK, FR
+  if (msg.channelId === ANN_EN) {
+    const author = msg.member?.displayName || msg.author.username;
+    const header = '📢 **' + author + '** (EN):';
+    try {
+      const results = await Promise.all([
+        ANN_DE ? translate(msg.content, 'de') : Promise.resolve(''),
+        ANN_SK ? translate(msg.content, 'sk') : Promise.resolve(''),
+        ANN_FR ? translate(msg.content, 'fr') : Promise.resolve('')
+      ]);
+      if (ANN_DE) { const ch = await client.channels.fetch(ANN_DE); await ch.send(header + '\n' + results[0]); }
+      if (ANN_SK) { const ch = await client.channels.fetch(ANN_SK); await ch.send(header + '\n' + results[1]); }
+      if (ANN_FR) { const ch = await client.channels.fetch(ANN_FR); await ch.send(header + '\n' + results[2]); }
+      console.log('ANN_EN translated');
+    } catch (err) { console.error('ANN_EN error:', err.message); }
+  }
+
+  // ANN_DE -> EN, SK, FR
+  if (msg.channelId === ANN_DE) {
+    const author = msg.member?.displayName || msg.author.username;
+    const header = '🇩🇪 **' + author + '** (DE):';
+    try {
+      const results = await Promise.all([
+        translate(msg.content, 'en'),
+        ANN_SK ? translate(msg.content, 'sk') : Promise.resolve(''),
+        ANN_FR ? translate(msg.content, 'fr') : Promise.resolve('')
+      ]);
+      if (ANN_EN) { const ch = await client.channels.fetch(ANN_EN); await ch.send(header + '\n' + results[0]); }
+      if (ANN_SK) { const ch = await client.channels.fetch(ANN_SK); await ch.send(header + '\n' + results[1]); }
+      if (ANN_FR) { const ch = await client.channels.fetch(ANN_FR); await ch.send(header + '\n' + results[2]); }
+      console.log('ANN_DE translated');
+    } catch (err) { console.error('ANN_DE error:', err.message); }
+  }
+
+  // ANN_SK -> EN, DE, FR
+  if (msg.channelId === ANN_SK) {
+    const author = msg.member?.displayName || msg.author.username;
+    const header = '🇸🇰 **' + author + '** (SK):';
+    try {
+      const results = await Promise.all([
+        translate(msg.content, 'en'),
+        ANN_DE ? translate(msg.content, 'de') : Promise.resolve(''),
+        ANN_FR ? translate(msg.content, 'fr') : Promise.resolve('')
+      ]);
+      if (ANN_EN) { const ch = await client.channels.fetch(ANN_EN); await ch.send(header + '\n' + results[0]); }
+      if (ANN_DE) { const ch = await client.channels.fetch(ANN_DE); await ch.send(header + '\n' + results[1]); }
+      if (ANN_FR) { const ch = await client.channels.fetch(ANN_FR); await ch.send(header + '\n' + results[2]); }
+      console.log('ANN_SK translated');
+    } catch (err) { console.error('ANN_SK error:', err.message); }
+  }
+
+  // ANN_FR -> EN, DE, SK
+  if (msg.channelId === ANN_FR) {
+    const author = msg.member?.displayName || msg.author.username;
+    const header = '🇫🇷 **' + author + '** (FR):';
+    try {
+      const results = await Promise.all([
+        translate(msg.content, 'en'),
+        ANN_DE ? translate(msg.content, 'de') : Promise.resolve(''),
+        ANN_SK ? translate(msg.content, 'sk') : Promise.resolve('')
+      ]);
+      if (ANN_EN) { const ch = await client.channels.fetch(ANN_EN); await ch.send(header + '\n' + results[0]); }
+      if (ANN_DE) { const ch = await client.channels.fetch(ANN_DE); await ch.send(header + '\n' + results[1]); }
+      if (ANN_SK) { const ch = await client.channels.fetch(ANN_SK); await ch.send(header + '\n' + results[2]); }
+      console.log('ANN_FR translated');
+    } catch (err) { console.error('ANN_FR error:', err.message); }
+  }
+
+  // === GENERAL CHAT GROUP ===
+  // GEN_EN -> DE, SK, FR
+  if (msg.channelId === GEN_EN) {
+    const author = msg.member?.displayName || msg.author.username;
+    const header = '📢 **' + author + '** (EN):';
+    try {
+      const results = await Promise.all([
+        GEN_DE ? translate(msg.content, 'de') : Promise.resolve(''),
+        GEN_SK ? translate(msg.content, 'sk') : Promise.resolve(''),
+        GEN_FR ? translate(msg.content, 'fr') : Promise.resolve('')
+      ]);
+      if (GEN_DE) { const ch = await client.channels.fetch(GEN_DE); await ch.send(header + '\n' + results[0]); }
+      if (GEN_SK) { const ch = await client.channels.fetch(GEN_SK); await ch.send(header + '\n' + results[1]); }
+      if (GEN_FR) { const ch = await client.channels.fetch(GEN_FR); await ch.send(header + '\n' + results[2]); }
+      console.log('GEN_EN translated');
+    } catch (err) { console.error('GEN_EN error:', err.message); }
+  }
+
+  // GEN_DE -> EN, SK, FR
+  if (msg.channelId === GEN_DE) {
+    const author = msg.member?.displayName || msg.author.username;
+    const header = '🇩🇪 **' + author + '** (DE):';
+    try {
+      const results = await Promise.all([
+        translate(msg.content, 'en'),
+        GEN_SK ? translate(msg.content, 'sk') : Promise.resolve(''),
+        GEN_FR ? translate(msg.content, 'fr') : Promise.resolve('')
+      ]);
+      if (GEN_EN) { const ch = await client.channels.fetch(GEN_EN); await ch.send(header + '\n' + results[0]); }
+      if (GEN_SK) { const ch = await client.channels.fetch(GEN_SK); await ch.send(header + '\n' + results[1]); }
+      if (GEN_FR) { const ch = await client.channels.fetch(GEN_FR); await ch.send(header + '\n' + results[2]); }
+      console.log('GEN_DE translated');
+    } catch (err) { console.error('GEN_DE error:', err.message); }
+  }
+
+  // GEN_SK -> EN, DE, FR
+  if (msg.channelId === GEN_SK) {
+    const author = msg.member?.displayName || msg.author.username;
+    const header = '🇸🇰 **' + author + '** (SK):';
+    try {
+      const results = await Promise.all([
+        translate(msg.content, 'en'),
+        GEN_DE ? translate(msg.content, 'de') : Promise.resolve(''),
+        GEN_FR ? translate(msg.content, 'fr') : Promise.resolve('')
+      ]);
+      if (GEN_EN) { const ch = await client.channels.fetch(GEN_EN); await ch.send(header + '\n' + results[0]); }
+      if (GEN_DE) { const ch = await client.channels.fetch(GEN_DE); await ch.send(header + '\n' + results[1]); }
+      if (GEN_FR) { const ch = await client.channels.fetch(GEN_FR); await ch.send(header + '\n' + results[2]); }
+      console.log('GEN_SK translated');
+    } catch (err) { console.error('GEN_SK error:', err.message); }
+  }
+
+  // GEN_FR -> EN, DE, SK
+  if (msg.channelId === GEN_FR) {
+    const author = msg.member?.displayName || msg.author.username;
+    const header = '🇫🇷 **' + author + '** (FR):';
+    try {
+      const results = await Promise.all([
+        translate(msg.content, 'en'),
+        GEN_DE ? translate(msg.content, 'de') : Promise.resolve(''),
+        GEN_SK ? translate(msg.content, 'sk') : Promise.resolve('')
+      ]);
+      if (GEN_EN) { const ch = await client.channels.fetch(GEN_EN); await ch.send(header + '\n' + results[0]); }
+      if (GEN_DE) { const ch = await client.channels.fetch(GEN_DE); await ch.send(header + '\n' + results[1]); }
+      if (GEN_SK) { const ch = await client.channels.fetch(GEN_SK); await ch.send(header + '\n' + results[2]); }
+      console.log('GEN_FR translated');
+    } catch (err) { console.error('GEN_FR error:', err.message); }
+  }
 });
 
 client.on('interactionCreate', async (interaction) => {
