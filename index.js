@@ -129,102 +129,123 @@ const commands = [
 ];
 
 async function postDailySchedule() {
-  if (!DAILY_CHANNEL_ID) {
-    console.log('No DAILY_CHANNEL_ID set, skipping daily post');
-    return;
-  }
   try {
     const now = new Date(new Date().toLocaleString('en-US', { timeZone: 'America/New_York' }));
-    const currentDay = now.getDay();
-    const nextDay = (currentDay + 1) % 7;
+    const nextDay = (now.getDay() + 1) % 7;
     const message = DAILY_MESSAGES[nextDay];
-    const ch = await client.channels.fetch(DAILY_CHANNEL_ID);
-    await ch.send(TBV_ROLE + '\n' + message);
-    console.log('Daily schedule posted for game day', nextDay);
+    const enMsg = TBV_ROLE + '\n' + message;
+    if (DAILY_CHANNEL_ID) { const ch = await client.channels.fetch(DAILY_CHANNEL_ID); await ch.send(enMsg); }
+        const langs = await Promise.all([
+      ANN_DE ? translate(message, 'de') : Promise.resolve(''),
+      ANN_SK ? translate(message, 'sk') : Promise.resolve(''),
+      ANN_FR ? translate(message, 'fr') : Promise.resolve(''),
+      ANN_ES ? translate(message, 'es') : Promise.resolve('')
+    ]);
+    if (ANN_DE) { const ch2 = await client.channels.fetch(ANN_DE); await ch2.send(langs[0]); }
+    if (ANN_SK) { const ch2 = await client.channels.fetch(ANN_SK); await ch2.send(langs[1]); }
+    if (ANN_FR) { const ch2 = await client.channels.fetch(ANN_FR); await ch2.send(langs[2]); }
+    if (ANN_ES) { const ch2 = await client.channels.fetch(ANN_ES); await ch2.send(langs[3]); }
+    console.log('Daily schedule posted to all language channels');
   } catch (err) {
     console.error('Failed to post daily schedule:', err.message);
   }
 }
 
 async function postZombieRaidReminder() {
-  if (!DAILY_CHANNEL_ID) {
-    console.log('No DAILY_CHANNEL_ID set, skipping zombie raid reminder');
-    return;
-  }
   try {
-    const reminder = TBV_ROLE + `
-⚔️ ZOMBIE RAID REMINDER – TODAY!
-
-Back-to-Back Zombie Raids:
-• 1st Raid: 18:00 GT
-• 2nd Raid: 20:00 GT
-
-Save stamina and prep squads in advance!`;
-    const ch = await client.channels.fetch(DAILY_CHANNEL_ID);
-    await ch.send(reminder);
-    console.log('Zombie raid reminder posted');
+    const text = '\u2694\uFE0F ZOMBIE RAID REMINDER \u2013 TODAY!\n\nBack-to-Back Zombie Raids:\n\u2022 1st Raid: 18:00 GT\n\u2022 2nd Raid: 20:00 GT\n\nSave stamina and prep squads in advance!\n~ Please keep at least one strong truck home all day';
+    if (DAILY_CHANNEL_ID) { const ch = await client.channels.fetch(DAILY_CHANNEL_ID); await ch.send(TBV_ROLE + '\n' + text); }
+        const langs = await Promise.all([
+      ANN_DE ? translate(text, 'de') : Promise.resolve(''),
+      ANN_SK ? translate(text, 'sk') : Promise.resolve(''),
+      ANN_FR ? translate(text, 'fr') : Promise.resolve(''),
+      ANN_ES ? translate(text, 'es') : Promise.resolve('')
+    ]);
+    if (ANN_DE) { const ch2 = await client.channels.fetch(ANN_DE); await ch2.send(langs[0]); }
+    if (ANN_SK) { const ch2 = await client.channels.fetch(ANN_SK); await ch2.send(langs[1]); }
+    if (ANN_FR) { const ch2 = await client.channels.fetch(ANN_FR); await ch2.send(langs[2]); }
+    if (ANN_ES) { const ch2 = await client.channels.fetch(ANN_ES); await ch2.send(langs[3]); }
+    console.log('Zombie raid reminder posted to all language channels');
   } catch (err) {
     console.error('Failed to post zombie raid reminder:', err.message);
   }
 }
 
 async function postSecondZombieRaidReminder() {
-  if (!DAILY_CHANNEL_ID) {
-    console.log('No DAILY_CHANNEL_ID set, skipping second zombie raid reminder');
-    return;
-  }
   try {
-    const reminder = TBV_ROLE + `
-⚔️ Second Zombie Raid starts in 30 minutes!
-20:00 GT`;
-    const ch = await client.channels.fetch(DAILY_CHANNEL_ID);
-    await ch.send(reminder);
-    console.log('Second zombie raid reminder posted');
+    const text = '\u2694\uFE0F Second Zombie Raid starts in 30 minutes!\n20:00 GT';
+    if (DAILY_CHANNEL_ID) { const ch = await client.channels.fetch(DAILY_CHANNEL_ID); await ch.send(TBV_ROLE + '\n' + text); }
+        const langs = await Promise.all([
+      ANN_DE ? translate(text, 'de') : Promise.resolve(''),
+      ANN_SK ? translate(text, 'sk') : Promise.resolve(''),
+      ANN_FR ? translate(text, 'fr') : Promise.resolve(''),
+      ANN_ES ? translate(text, 'es') : Promise.resolve('')
+    ]);
+    if (ANN_DE) { const ch2 = await client.channels.fetch(ANN_DE); await ch2.send(langs[0]); }
+    if (ANN_SK) { const ch2 = await client.channels.fetch(ANN_SK); await ch2.send(langs[1]); }
+    if (ANN_FR) { const ch2 = await client.channels.fetch(ANN_FR); await ch2.send(langs[2]); }
+    if (ANN_ES) { const ch2 = await client.channels.fetch(ANN_ES); await ch2.send(langs[3]); }
+    console.log('Second zombie raid reminder posted to all language channels');
   } catch (err) {
     console.error('Failed to post second zombie raid reminder:', err.message);
   }
 }
 
 async function postLevel11Bauxite() {
-  if (!DAILY_CHANNEL_ID) {
-    console.log('No DAILY_CHANNEL_ID set, skipping level 11 bauxite reminder');
-    return;
-  }
   try {
-    const reminder = `⛏️ You can now start pre-gathering a level 11 bauxite mine`;
-    const ch = await client.channels.fetch(DAILY_CHANNEL_ID);
-    await ch.send(reminder);
-    console.log('Level 11 bauxite reminder posted');
+    const text = '\u26CF\uFE0F You can now start pre-gathering a level 11 bauxite mine';
+    if (DAILY_CHANNEL_ID) { const ch = await client.channels.fetch(DAILY_CHANNEL_ID); await ch.send(text); }
+        const langs = await Promise.all([
+      ANN_DE ? translate(text, 'de') : Promise.resolve(''),
+      ANN_SK ? translate(text, 'sk') : Promise.resolve(''),
+      ANN_FR ? translate(text, 'fr') : Promise.resolve(''),
+      ANN_ES ? translate(text, 'es') : Promise.resolve('')
+    ]);
+    if (ANN_DE) { const ch2 = await client.channels.fetch(ANN_DE); await ch2.send(langs[0]); }
+    if (ANN_SK) { const ch2 = await client.channels.fetch(ANN_SK); await ch2.send(langs[1]); }
+    if (ANN_FR) { const ch2 = await client.channels.fetch(ANN_FR); await ch2.send(langs[2]); }
+    if (ANN_ES) { const ch2 = await client.channels.fetch(ANN_ES); await ch2.send(langs[3]); }
+    console.log('Level 11 bauxite posted to all language channels');
   } catch (err) {
     console.error('Failed to post level 11 bauxite reminder:', err.message);
   }
 }
 
 async function postLevel10Bauxite() {
-  if (!DAILY_CHANNEL_ID) {
-    console.log('No DAILY_CHANNEL_ID set, skipping level 10 bauxite reminder');
-    return;
-  }
   try {
-    const reminder = `⛏️ You can now start pre-gathering a level 10 bauxite mine`;
-    const ch = await client.channels.fetch(DAILY_CHANNEL_ID);
-    await ch.send(reminder);
-    console.log('Level 10 bauxite reminder posted');
+    const text = '\u26CF\uFE0F You can now start pre-gathering a level 10 bauxite mine';
+    if (DAILY_CHANNEL_ID) { const ch = await client.channels.fetch(DAILY_CHANNEL_ID); await ch.send(text); }
+        const langs = await Promise.all([
+      ANN_DE ? translate(text, 'de') : Promise.resolve(''),
+      ANN_SK ? translate(text, 'sk') : Promise.resolve(''),
+      ANN_FR ? translate(text, 'fr') : Promise.resolve(''),
+      ANN_ES ? translate(text, 'es') : Promise.resolve('')
+    ]);
+    if (ANN_DE) { const ch2 = await client.channels.fetch(ANN_DE); await ch2.send(langs[0]); }
+    if (ANN_SK) { const ch2 = await client.channels.fetch(ANN_SK); await ch2.send(langs[1]); }
+    if (ANN_FR) { const ch2 = await client.channels.fetch(ANN_FR); await ch2.send(langs[2]); }
+    if (ANN_ES) { const ch2 = await client.channels.fetch(ANN_ES); await ch2.send(langs[3]); }
+    console.log('Level 10 bauxite posted to all language channels');
   } catch (err) {
     console.error('Failed to post level 10 bauxite reminder:', err.message);
   }
 }
 
 async function postLevel9Bauxite() {
-  if (!DAILY_CHANNEL_ID) {
-    console.log('No DAILY_CHANNEL_ID set, skipping level 9 bauxite reminder');
-    return;
-  }
   try {
-    const reminder = `⛏️ You can now start pre-gathering a level 9 bauxite mine`;
-    const ch = await client.channels.fetch(DAILY_CHANNEL_ID);
-    await ch.send(reminder);
-    console.log('Level 9 bauxite reminder posted');
+    const text = '\u26CF\uFE0F You can now start pre-gathering a level 9 bauxite mine';
+    if (DAILY_CHANNEL_ID) { const ch = await client.channels.fetch(DAILY_CHANNEL_ID); await ch.send(text); }
+        const langs = await Promise.all([
+      ANN_DE ? translate(text, 'de') : Promise.resolve(''),
+      ANN_SK ? translate(text, 'sk') : Promise.resolve(''),
+      ANN_FR ? translate(text, 'fr') : Promise.resolve(''),
+      ANN_ES ? translate(text, 'es') : Promise.resolve('')
+    ]);
+    if (ANN_DE) { const ch2 = await client.channels.fetch(ANN_DE); await ch2.send(langs[0]); }
+    if (ANN_SK) { const ch2 = await client.channels.fetch(ANN_SK); await ch2.send(langs[1]); }
+    if (ANN_FR) { const ch2 = await client.channels.fetch(ANN_FR); await ch2.send(langs[2]); }
+    if (ANN_ES) { const ch2 = await client.channels.fetch(ANN_ES); await ch2.send(langs[3]); }
+    console.log('Level 9 bauxite posted to all language channels');
   } catch (err) {
     console.error('Failed to post level 9 bauxite reminder:', err.message);
   }
