@@ -61,7 +61,7 @@ Primary Focus:
 • Upgrade statues
 
 ⚔️ ZOMBIE RAID DAY – Back-to-Back Zombie Raids:
-• 1st Raid: 18:00 GT
+• 1st Raid: 17:00 GT
 • 2nd Raid: 20:00 GT
 
 Save stamina and prep squads in advance.`,
