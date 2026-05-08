@@ -588,7 +588,10 @@ client.on('interactionCreate', async (interaction) => {
     const message = DAILY_MESSAGES[nextDay];
     await interaction.reply('**Current game day schedule:**\n\n' + message);
   } else if (interaction.commandName === 'city-capture') {
-    await interaction.deferReply({ ephemeral: true });
+    const ALLOWED_ROLES = ['1313804715460657252', '1273398746872283348', '1228912852899987488'];
+    const hasRole = interaction.member && ALLOWED_ROLES.some(id => interaction.member.roles.cache.has(id));
+    if (!hasRole) { await interaction.reply({ content: 'You need the R4 role or above to use this command.', ephemeral: true }); return; }
+    await interaction.deferReply();
     const msg = 'City Capture is starting now \uD83E\uDD18\uD83C\uDFFB';
     try {
       const [de, sk, fr, es] = await Promise.all([
@@ -604,7 +607,10 @@ client.on('interactionCreate', async (interaction) => {
       await interaction.editReply('Failed to send announcement: ' + err.message);
     }
   } else if (interaction.commandName === 'zombie-raid') {
-    await interaction.deferReply({ ephemeral: true });
+    const ALLOWED_ROLES = ['1313804715460657252', '1273398746872283348', '1228912852899987488'];
+    const hasRole = interaction.member && ALLOWED_ROLES.some(id => interaction.member.roles.cache.has(id));
+    if (!hasRole) { await interaction.reply({ content: 'You need the R4 role or above to use this command.', ephemeral: true }); return; }
+    await interaction.deferReply();
     const msg = 'Zombie raid has started \uD83E\uDDDF';
     try {
       const [de, sk, fr, es] = await Promise.all([
