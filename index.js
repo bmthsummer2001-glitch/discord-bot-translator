@@ -121,6 +121,8 @@ const commands = [
   new SlashCommandBuilder().setName('ping').setDescription('Check bot status').toJSON(),
   new SlashCommandBuilder().setName('help').setDescription('Show commands').toJSON(),
   new SlashCommandBuilder().setName('today').setDescription('Show todays game schedule').toJSON(),
+  new SlashCommandBuilder().setName('city-capture').setDescription('Announce City Capture is starting now').toJSON(),
+  new SlashCommandBuilder().setName('zombie-raid').setDescription('Announce Zombie Raid has started').toJSON(),
   new SlashCommandBuilder()
     .setName('translate')
     .setDescription('Translate text to German and Slovak')
@@ -585,12 +587,44 @@ client.on('interactionCreate', async (interaction) => {
     const nextDay = (currentDay + 1) % 7;
     const message = DAILY_MESSAGES[nextDay];
     await interaction.reply('**Current game day schedule:**\n\n' + message);
+  } else if (interaction.commandName === 'city-capture') {
+    await interaction.deferReply({ ephemeral: true });
+    const msg = 'City Capture is starting now \uD83E\uDD18\uD83C\uDFFB';
+    try {
+      const [de, sk, fr, es] = await Promise.all([
+        translate(msg, 'de'), translate(msg, 'sk'), translate(msg, 'fr'), translate(msg, 'es')
+      ]);
+      if (ANN_EN) { const ch = await client.channels.fetch(ANN_EN); await ch.send(msg); }
+      if (ANN_DE) { const ch = await client.channels.fetch(ANN_DE); await ch.send(de); }
+      if (ANN_SK) { const ch = await client.channels.fetch(ANN_SK); await ch.send(sk); }
+      if (ANN_FR) { const ch = await client.channels.fetch(ANN_FR); await ch.send(fr); }
+      if (ANN_ES) { const ch = await client.channels.fetch(ANN_ES); await ch.send(es); }
+      await interaction.editReply('City Capture announcement sent to all channels!');
+    } catch (err) {
+      await interaction.editReply('Failed to send announcement: ' + err.message);
+    }
+  } else if (interaction.commandName === 'zombie-raid') {
+    await interaction.deferReply({ ephemeral: true });
+    const msg = 'Zombie raid has started \uD83E\uDDDF';
+    try {
+      const [de, sk, fr, es] = await Promise.all([
+        translate(msg, 'de'), translate(msg, 'sk'), translate(msg, 'fr'), translate(msg, 'es')
+      ]);
+      if (ANN_EN) { const ch = await client.channels.fetch(ANN_EN); await ch.send(msg); }
+      if (ANN_DE) { const ch = await client.channels.fetch(ANN_DE); await ch.send(de); }
+      if (ANN_SK) { const ch = await client.channels.fetch(ANN_SK); await ch.send(sk); }
+      if (ANN_FR) { const ch = await client.channels.fetch(ANN_FR); await ch.send(fr); }
+      if (ANN_ES) { const ch = await client.channels.fetch(ANN_ES); await ch.send(es); }
+      await interaction.editReply('Zombie Raid announcement sent to all channels!');
+    } catch (err) {
+      await interaction.editReply('Failed to send announcement: ' + err.message);
+    }
   } else if (interaction.commandName === 'translate') {
     await interaction.deferReply();
     const text = interaction.options.getString('text', true);
     try {
       const [de, sk] = await Promise.all([translate(text, 'de'), translate(text, 'sk')]);
-      await interaction.editReply('**Original:** ' + text + '\n🇩🇪 **German:** ' + de + '\n🇸🇰 **Slovak:** ' + sk);
+      await interaction.editReply('**Original:** ' + text + '\n\uD83C\uDDE9\uD83C\uDDEA **German:** ' + de + '\n\uD83C\uDDF8\uD83C\uDDF0 **Slovak:** ' + sk);
     } catch (err) {
       await interaction.editReply('Translation failed. Please try again.');
     }
