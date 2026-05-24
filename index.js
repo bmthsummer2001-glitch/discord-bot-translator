@@ -266,13 +266,13 @@ client.once('ready', async (c) => {
   }, { timezone: 'America/New_York' });
   console.log('Daily schedule cron job set for 10:00 PM ET');
 
-  cron.schedule('0 12 * * 2', () => {
+  cron.schedule('0 12 * * 4', () => {
     console.log('Posting zombie raid reminder...');
     postZombieRaidReminder();
   }, { timezone: 'America/New_York' });
   console.log('Zombie raid reminder cron job set for 12:00 PM ET on Tuesdays');
 
-  cron.schedule('30 17 * * 2', () => {
+  cron.schedule('30 17 * * 4', () => {
     console.log('Posting second zombie raid reminder...');
     postSecondZombieRaidReminder();
   }, { timezone: 'America/New_York' });
