@@ -61,8 +61,8 @@ Primary Focus:
 • Upgrade statues
 
 ⚔️ ZOMBIE RAID DAY – Back-to-Back Zombie Raids:
-• 1st Raid: 17:00 GT
-• 2nd Raid: 20:00 GT
+• 1st Raid: 18:00 GT
+• 2nd Raid: 21:00 GT
 
 Save stamina and prep squads in advance.`,
   3: `🔷 WEDNESDAY – Research day
@@ -155,7 +155,7 @@ async function postDailySchedule() {
 
 async function postZombieRaidReminder() {
   try {
-    const text = '\u2694\uFE0F ZOMBIE RAID REMINDER \u2013 TODAY!\n\nBack-to-Back Zombie Raids:\n\u2022 1st Raid: 17:00 GT\n\u2022 2nd Raid: 20:00 GT\n\nSave stamina and prep squads in advance!\n~ Please keep at least one strong truck home all day';
+    const text = '\u2694\uFE0F ZOMBIE RAID REMINDER \u2013 TODAY!\n\nBack-to-Back Zombie Raids:\n\u2022 1st Raid: 18:00 GT\n\u2022 2nd Raid: 21:00 GT\n\nSave stamina and prep squads in advance!\n~ Please keep at least one strong truck home all day';
     if (DAILY_CHANNEL_ID) { const ch = await client.channels.fetch(DAILY_CHANNEL_ID); await ch.send(TBV_ROLE + '\n' + text); }
         const langs = await Promise.all([
       ANN_DE ? translate(text, 'de') : Promise.resolve(''),
@@ -175,7 +175,7 @@ async function postZombieRaidReminder() {
 
 async function postSecondZombieRaidReminder() {
   try {
-    const text = '\u2694\uFE0F Second Zombie Raid starts in 30 minutes!\n20:00 GT';
+    const text = '\u2694\uFE0F Second Zombie Raid starts in 30 minutes!\n21:00 GT';
     if (DAILY_CHANNEL_ID) { const ch = await client.channels.fetch(DAILY_CHANNEL_ID); await ch.send(TBV_ROLE + '\n' + text); }
         const langs = await Promise.all([
       ANN_DE ? translate(text, 'de') : Promise.resolve(''),
