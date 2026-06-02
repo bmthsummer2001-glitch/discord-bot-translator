@@ -58,13 +58,7 @@ Starts at: 00:30 GT
 Primary Focus:
 • Base building upgrades
 • Upgrade vehicle parts
-• Upgrade statues
-
-⚔️ ZOMBIE RAID DAY – Back-to-Back Zombie Raids:
-• 1st Raid: 18:00 GT
-• 2nd Raid: 21:00 GT
-
-Save stamina and prep squads in advance.`,
+• Upgrade statues`,
   3: `🔷 WEDNESDAY – Research day
 Starts at 00:30 GT
 
@@ -77,9 +71,15 @@ Primary Focus ~ Research new technologies in the Tech Center:
 • Start long builds before reset
 • Finish research after reset for Ad Duel points`,
   4: `🔷 THURSDAY – Recruitment day
-Starts at: 00:30 CT
+Starts at: 00:30 GT
 
-• Hero recruitment`,
+• Hero recruitment
+
+⚔️ ZOMBIE RAID DAY – Back-to-Back Zombie Raids:
+• 1st Raid: 18:00 GT
+• 2nd Raid: 21:00 GT
+
+Save stamina and prep squads in advance.`,
   5: `🔷 FRIDAY – Training day
 Starts at 00:30 GT
 
