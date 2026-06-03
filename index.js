@@ -58,12 +58,12 @@ Starts at: 00:30 GT
 Primary Focus:
 • Base building upgrades
 • Upgrade vehicle parts
-• Upgrade statues`,
+• Upgrade statues
+• Produce truck parts (used for vehicle upgrades, troop transport, and power boosts)`,
   3: `🔷 WEDNESDAY – Research day
 Starts at 00:30 GT
 
 Primary Focus ~ Research new technologies in the Tech Center:
-• Produce truck parts (used for vehicle upgrades, troop transport, and power boosts)
 • Craft/upgrade ultimate weapons
 • Fuse or mutate modules
 
