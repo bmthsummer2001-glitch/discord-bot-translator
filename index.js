@@ -66,6 +66,7 @@ Starts at 00:30 GT
 Primary Focus ~ Research new technologies in the Tech Center:
 • Craft/upgrade ultimate weapons
 • Fuse or mutate modules
+• Open/craft gear
 
 ⏱️ Timing Tips:
 • Start long builds before reset
