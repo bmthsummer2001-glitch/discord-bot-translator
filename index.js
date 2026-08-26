@@ -26,11 +26,54 @@ if (!TOKEN) {
   process.exit(1);
 }
 
+const MYMEMORY_TRANSLATE_URL = 'https://api.mymemory.translated.net/get';
+const TRANSLATION_TIMEOUT_MS = 12000;
+
+function detectSourceLanguage(text) {
+  const lower = text.toLowerCase();
+  if (/[äöüß]/.test(lower) || /\b(der|die|das|und|nicht|ich|ist|für)\b/.test(lower)) return 'de';
+  if (/[áäčďéíĺľňóôŕšťúýž]/.test(lower) || /\b(je|nie|som|že|pre|ako|na|sa)\b/.test(lower)) return 'sk';
+  if (/[àâçéèêëîïôùûüÿœ]/.test(lower) || /\b(le|la|les|des|une|est|pour|avec)\b/.test(lower)) return 'fr';
+  if (/[áéíóúüñ¿¡]/.test(lower) || /\b(el|la|los|las|una|es|para|con)\b/.test(lower)) return 'es';
+  return 'en';
+}
+
 async function translate(text, lang) {
-  const url = 'https://translate.googleapis.com/translate_a/single?client=gtx&sl=auto&tl=' + lang + '&dt=t&q=' + encodeURIComponent(text);
-  const res = await fetch(url, { headers: { 'User-Agent': 'Mozilla/5.0' } });
+  const sourceLang = detectSourceLanguage(text);
+  if (sourceLang === lang) return text;
+
+  const params = new URLSearchParams({
+    q: text,
+    langpair: sourceLang + '|' + lang,
+    mt: '1'
+  });
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), TRANSLATION_TIMEOUT_MS);
+
+  let res;
+  try {
+    res = await fetch(MYMEMORY_TRANSLATE_URL + '?' + params.toString(), {
+      signal: controller.signal,
+      headers: {
+        Accept: 'application/json',
+        'User-Agent': 'DiscordTranslationBot/1.0'
+      }
+    });
+  } finally {
+    clearTimeout(timeout);
+  }
+
+  if (!res.ok) {
+    throw new Error('Translation request failed: ' + res.status + ' ' + res.statusText);
+  }
+
   const data = await res.json();
-  return data[0].map(c => c[0]).filter(Boolean).join('');
+  const translated = data?.responseData?.translatedText?.trim();
+  if (data?.quotaFinished) throw new Error('Translation provider quota is exhausted');
+  if (data?.responseStatus !== 200 || !translated) {
+    throw new Error('Empty or invalid translation response');
+  }
+  return translated;
 }
 
 const DAILY_MESSAGES = {
