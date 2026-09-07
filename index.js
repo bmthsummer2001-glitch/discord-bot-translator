@@ -31,7 +31,8 @@ if (!TOKEN) {
 }
 
 const MYMEMORY_TRANSLATE_URL = 'https://api.mymemory.translated.net/get';
-const TRANSLATION_TIMEOUT_MS = 12000;
+const TRANSLATION_TIMEOUT_MS = 15000;
+const TRANSLATION_ATTEMPTS = 3;
 
 function detectSourceLanguage(text) {
   const lower = text.toLowerCase();
@@ -42,7 +43,7 @@ function detectSourceLanguage(text) {
   return 'en';
 }
 
-async function translate(text, lang) {
+async function translateOnce(text, lang) {
   const sourceLang = detectSourceLanguage(text);
   if (sourceLang === lang) return text;
 
@@ -78,6 +79,26 @@ async function translate(text, lang) {
     throw new Error('Empty or invalid translation response');
   }
   return translated;
+}
+
+async function translate(text, lang) {
+  let lastError;
+
+  for (let attempt = 1; attempt <= TRANSLATION_ATTEMPTS; attempt++) {
+    try {
+      return await translateOnce(text, lang);
+    } catch (err) {
+      lastError = err;
+      if (attempt === TRANSLATION_ATTEMPTS) break;
+      const delayMs = attempt * 1500;
+      console.warn('Translation attempt ' + attempt + ' failed for ' + lang + '; retrying in ' + delayMs + 'ms');
+      await new Promise(resolve => setTimeout(resolve, delayMs));
+    }
+  }
+
+  throw lastError instanceof Error
+    ? lastError
+    : new Error('Translation failed after retries');
 }
 
 const DAILY_MESSAGES = {
