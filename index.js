@@ -21,6 +21,10 @@ const GEN_SK = process.env.GEN_SK_CHANNEL_ID;
 const GEN_FR = process.env.GEN_FR_CHANNEL_ID;
 const GEN_ES = process.env.GEN_ES_CHANNEL_ID;
 
+// Dedicated English ↔ German channel pair
+const CROSS_EN = process.env.CROSS_EN_CHANNEL_ID;
+const CROSS_DE = process.env.CROSS_DE_CHANNEL_ID;
+
 if (!TOKEN) {
   console.error('Missing DISCORD_BOT_TOKEN');
   process.exit(1);
@@ -343,6 +347,31 @@ client.once('ready', async (c) => {
 
 client.on('messageCreate', async (msg) => {
   if (msg.author.bot || msg.author.id === botUserId) return;
+
+  // Dedicated English ↔ German pair
+  if (CROSS_EN && msg.channelId === CROSS_EN) {
+    const author = msg.member?.displayName || msg.author.username;
+    try {
+      const translated = await translate(msg.content, 'de');
+      const channel = await client.channels.fetch(CROSS_DE);
+      await channel.send('🇬🇧 **' + author + '** (English → German):\n' + translated);
+      console.log('Dedicated English message translated to German');
+    } catch (err) {
+      console.error('Dedicated EN→DE translation error:', err.message);
+    }
+  }
+
+  if (CROSS_DE && msg.channelId === CROSS_DE) {
+    const author = msg.member?.displayName || msg.author.username;
+    try {
+      const translated = await translate(msg.content, 'en');
+      const channel = await client.channels.fetch(CROSS_EN);
+      await channel.send('🇩🇪 **' + author + '** (German → English):\n' + translated);
+      console.log('Dedicated German message translated to English');
+    } catch (err) {
+      console.error('Dedicated DE→EN translation error:', err.message);
+    }
+  }
 
   // Leadership → German & Slovak
   if (msg.channelId === LEADERSHIP) {
