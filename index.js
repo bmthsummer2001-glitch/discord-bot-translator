@@ -17,6 +17,8 @@ const ANN_ES = process.env.ANN_ES_CHANNEL_ID;
 // General chat channels
 const GEN_EN = process.env.GEN_EN_CHANNEL_ID;
 const GEN_DE = process.env.GEN_DE_CHANNEL_ID;
+const GEN_SK = process.env.GEN_SK_CHANNEL_ID;
+const GEN_FR = process.env.GEN_FR_CHANNEL_ID;
 const GEN_ES = process.env.GEN_ES_CHANNEL_ID;
 
 // Dedicated English ↔ German channel pair
@@ -582,35 +584,81 @@ client.on('messageCreate', async (msg) => {
     } catch (err) { console.error('ANN_FR error:', err.message); }
   }
 
-  // === GENERAL CHAT GROUP (EN / DE / ES) ===
-  // GEN_EN -> DE, ES
+  // === GENERAL CHAT GROUP ===
+  // GEN_EN -> DE, SK, FR
   if (msg.channelId === GEN_EN) {
     const author = msg.member?.displayName || msg.author.username;
     const header = '📢 **' + author + '** (EN):';
     try {
       const results = await translateTargets(msg.content, 'en', [
         GEN_DE ? 'de' : null,
+        GEN_SK ? 'sk' : null,
+        GEN_FR ? 'fr' : null,
         GEN_ES ? 'es' : null
       ]);
       await sendToChannel(GEN_DE, header + '\n' + results[0], 'GEN_EN→German');
-      await sendToChannel(GEN_ES, header + '\n' + results[1], 'GEN_EN→Spanish');
+      await sendToChannel(GEN_SK, header + '\n' + results[1], 'GEN_EN→Slovak');
+      await sendToChannel(GEN_FR, header + '\n' + results[2], 'GEN_EN→French');
+      await sendToChannel(GEN_ES, header + '\n' + results[3], 'GEN_EN→Spanish');
       console.log('GEN_EN translated');
     } catch (err) { console.error('GEN_EN error:', err.message); }
   }
 
-  // GEN_DE -> EN, ES
+  // GEN_DE -> EN, SK, FR
   if (msg.channelId === GEN_DE) {
     const author = msg.member?.displayName || msg.author.username;
     const header = '🇩🇪 **' + author + '** (DE):';
     try {
       const results = await translateTargets(msg.content, 'de', [
         'en',
+        GEN_SK ? 'sk' : null,
+        GEN_FR ? 'fr' : null,
         GEN_ES ? 'es' : null
       ]);
       await sendToChannel(GEN_EN, header + '\n' + results[0], 'GEN_DE→English');
-      await sendToChannel(GEN_ES, header + '\n' + results[1], 'GEN_DE→Spanish');
+      await sendToChannel(GEN_SK, header + '\n' + results[1], 'GEN_DE→Slovak');
+      await sendToChannel(GEN_FR, header + '\n' + results[2], 'GEN_DE→French');
+      await sendToChannel(GEN_ES, header + '\n' + results[3], 'GEN_DE→Spanish');
       console.log('GEN_DE translated');
     } catch (err) { console.error('GEN_DE error:', err.message); }
+  }
+
+  // GEN_SK -> EN, DE, FR
+  if (msg.channelId === GEN_SK) {
+    const author = msg.member?.displayName || msg.author.username;
+    const header = '🇸🇰 **' + author + '** (SK):';
+    try {
+      const results = await translateTargets(msg.content, 'sk', [
+        'en',
+        GEN_DE ? 'de' : null,
+        GEN_FR ? 'fr' : null,
+        GEN_ES ? 'es' : null
+      ]);
+      await sendToChannel(GEN_EN, header + '\n' + results[0], 'GEN_SK→English');
+      await sendToChannel(GEN_DE, header + '\n' + results[1], 'GEN_SK→German');
+      await sendToChannel(GEN_FR, header + '\n' + results[2], 'GEN_SK→French');
+      await sendToChannel(GEN_ES, header + '\n' + results[3], 'GEN_SK→Spanish');
+      console.log('GEN_SK translated');
+    } catch (err) { console.error('GEN_SK error:', err.message); }
+  }
+
+  // GEN_FR -> EN, DE, SK
+  if (msg.channelId === GEN_FR) {
+    const author = msg.member?.displayName || msg.author.username;
+    const header = '🇫🇷 **' + author + '** (FR):';
+    try {
+      const results = await translateTargets(msg.content, 'fr', [
+        'en',
+        GEN_DE ? 'de' : null,
+        GEN_SK ? 'sk' : null,
+        GEN_ES ? 'es' : null
+      ]);
+      await sendToChannel(GEN_EN, header + '\n' + results[0], 'GEN_FR→English');
+      await sendToChannel(GEN_DE, header + '\n' + results[1], 'GEN_FR→German');
+      await sendToChannel(GEN_SK, header + '\n' + results[2], 'GEN_FR→Slovak');
+      await sendToChannel(GEN_ES, header + '\n' + results[3], 'GEN_FR→Spanish');
+      console.log('GEN_FR translated');
+    } catch (err) { console.error('GEN_FR error:', err.message); }
   }
 
   // ANN_ES -> EN, DE, SK, FR
@@ -632,17 +680,21 @@ client.on('messageCreate', async (msg) => {
     } catch (err) { console.error('ANN_ES error:', err.message); }
   }
 
-  // GEN_ES -> EN, DE
+  // GEN_ES -> EN, DE, SK, FR
   if (msg.channelId === GEN_ES) {
     const author = msg.member?.displayName || msg.author.username;
     const header = '🇪🇸 **' + author + '** (ES):';
     try {
       const results = await translateTargets(msg.content, 'es', [
         'en',
-        GEN_DE ? 'de' : null
+        GEN_DE ? 'de' : null,
+        GEN_SK ? 'sk' : null,
+        GEN_FR ? 'fr' : null
       ]);
       await sendToChannel(GEN_EN, header + '\n' + results[0], 'GEN_ES→English');
       await sendToChannel(GEN_DE, header + '\n' + results[1], 'GEN_ES→German');
+      await sendToChannel(GEN_SK, header + '\n' + results[2], 'GEN_ES→Slovak');
+      await sendToChannel(GEN_FR, header + '\n' + results[3], 'GEN_ES→French');
       console.log('GEN_ES translated');
     } catch (err) { console.error('GEN_ES error:', err.message); }
   }
