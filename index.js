@@ -236,7 +236,7 @@ const commands = [
   new SlashCommandBuilder().setName('zombie-raid').setDescription('Announce Zombie Raid has started').toJSON(),
   new SlashCommandBuilder()
     .setName('translate')
-    .setDescription('Translate text to German and Slovak')
+    .setDescription('Translate text to German and Spanish')
     .addStringOption(o => o.setName('text').setDescription('Text to translate').setRequired(true))
     .toJSON()
 ];
@@ -442,20 +442,20 @@ client.on('messageCreate', async (msg) => {
     }
   }
 
-  // Leadership → German & Slovak
+  // Leadership → German & Spanish
   if (msg.channelId === LEADERSHIP) {
     console.log('Translating Leadership message from', msg.author.username);
     const author = msg.member?.displayName || msg.author.username;
     const header = '📢 **' + author + '** (Leadership):';
 
     try {
-      const [de, sk] = await translateTargets(msg.content, 'en', [
+      const [de, es] = await translateTargets(msg.content, 'en', [
         GERMAN ? 'de' : null,
-        SLOVAK ? 'sk' : null
+        SLOVAK ? 'es' : null
       ]);
 
       await sendToChannel(GERMAN, header + '\n' + de, 'Leadership→German');
-      await sendToChannel(SLOVAK, header + '\n' + sk, 'Leadership→Slovak');
+      await sendToChannel(SLOVAK, header + '\n' + es, 'Leadership→Spanish');
 
       console.log('Translations posted successfully');
     } catch (err) {
@@ -463,45 +463,45 @@ client.on('messageCreate', async (msg) => {
     }
   }
 
-  // German → English to Leadership + Slovak translation
+  // German → English to Leadership + Spanish translation
   if (msg.channelId === GERMAN) {
     console.log('Translating German message from', msg.author.username);
     const author = msg.member?.displayName || msg.author.username;
     const headerEn = '🇩🇪 **' + author + '** (German):';
-    const headerSk = '🇩🇪 **' + author + '** (German → Slovak):';
+    const headerEs = '🇩🇪 **' + author + '** (German → Spanish):';
 
     try {
-      const [en, sk] = await translateTargets(msg.content, 'de', [
+      const [en, es] = await translateTargets(msg.content, 'de', [
         'en',
-        SLOVAK ? 'sk' : null
+        SLOVAK ? 'es' : null
       ]);
 
       await sendToChannel(LEADERSHIP, headerEn + '\n' + en, 'German→Leadership');
-      await sendToChannel(SLOVAK, headerSk + '\n' + sk, 'German→Slovak');
+      await sendToChannel(SLOVAK, headerEs + '\n' + es, 'German→Spanish');
 
-      console.log('German message posted to Leadership and Slovak');
+      console.log('German message posted to Leadership and Spanish');
     } catch (err) {
       console.error('Translation error:', err.message);
     }
   }
 
-  // Slovak → English to Leadership + German translation
+  // Spanish → English to Leadership + German translation
   if (msg.channelId === SLOVAK) {
-    console.log('Translating Slovak message from', msg.author.username);
+    console.log('Translating Spanish message from', msg.author.username);
     const author = msg.member?.displayName || msg.author.username;
-    const headerEn = '🇸🇰 **' + author + '** (Slovak):';
-    const headerDe = '🇸🇰 **' + author + '** (Slovak → German):';
+    const headerEn = '🇪🇸 **' + author + '** (Spanish):';
+    const headerDe = '🇪🇸 **' + author + '** (Spanish → German):';
 
     try {
-      const [en, de] = await translateTargets(msg.content, 'sk', [
+      const [en, de] = await translateTargets(msg.content, 'es', [
         'en',
         GERMAN ? 'de' : null
       ]);
 
-      await sendToChannel(LEADERSHIP, headerEn + '\n' + en, 'Slovak→Leadership');
-      await sendToChannel(GERMAN, headerDe + '\n' + de, 'Slovak→German');
+      await sendToChannel(LEADERSHIP, headerEn + '\n' + en, 'Spanish→Leadership');
+      await sendToChannel(GERMAN, headerDe + '\n' + de, 'Spanish→German');
 
-      console.log('Slovak message posted to Leadership and German');
+      console.log('Spanish message posted to Leadership and German');
     } catch (err) {
       console.error('Translation error:', err.message);
     }
@@ -706,7 +706,7 @@ client.on('interactionCreate', async (interaction) => {
   if (interaction.commandName === 'ping') {
     await interaction.reply('Pong! Bot is online and running.');
   } else if (interaction.commandName === 'help') {
-    await interaction.reply('Commands:\n/ping - Check status\n/today - Show todays game schedule\n/translate <text> - Translate to German and Slovak\n/help - Show this message');
+    await interaction.reply('Commands:\n/ping - Check status\n/today - Show todays game schedule\n/translate <text> - Translate to German and Spanish\n/help - Show this message');
   } else if (interaction.commandName === 'today') {
     const now = new Date(new Date().toLocaleString('en-US', { timeZone: 'America/New_York' }));
     const currentDay = now.getDay();
@@ -751,8 +751,8 @@ client.on('interactionCreate', async (interaction) => {
     await interaction.deferReply();
     const text = interaction.options.getString('text', true);
     try {
-      const [de, sk] = await translateTargets(text, 'en', ['de', 'sk']);
-      await interaction.editReply('**Original:** ' + text + '\n\uD83C\uDDE9\uD83C\uDDEA **German:** ' + de + '\n\uD83C\uDDF8\uD83C\uDDF0 **Slovak:** ' + sk);
+      const [de, es] = await translateTargets(text, 'en', ['de', 'es']);
+      await interaction.editReply('**Original:** ' + text + '\n\uD83C\uDDE9\uD83C\uDDEA **German:** ' + de + '\n\uD83C\uDDEA\uD83C\uDDF8 **Spanish:** ' + es);
     } catch (err) {
       await interaction.editReply('Translation failed. Please try again.');
     }
