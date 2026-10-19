@@ -22,9 +22,11 @@ const GEN_SK = process.env.GEN_SK_CHANNEL_ID;
 const GEN_FR = process.env.GEN_FR_CHANNEL_ID;
 const GEN_ES = process.env.GEN_ES_CHANNEL_ID;
 
-// Dedicated English ↔ German channel pair
+// Dedicated 4-way channel group (EN / DE / ES / SK)
 const CROSS_EN = process.env.CROSS_EN_CHANNEL_ID;
 const CROSS_DE = process.env.CROSS_DE_CHANNEL_ID;
+const CROSS_ES = process.env.CROSS_ES_CHANNEL_ID;
+const CROSS_SK = process.env.CROSS_SK_CHANNEL_ID;
 
 if (!TOKEN) {
   console.error('Missing DISCORD_BOT_TOKEN');
@@ -412,35 +414,72 @@ client.once('ready', async (c) => {
 client.on('messageCreate', async (msg) => {
   if (msg.author.bot || msg.author.id === botUserId) return;
 
-  // Dedicated English ↔ German pair
+  // Dedicated 4-way group: EN → DE, ES, SK
   if (CROSS_EN && msg.channelId === CROSS_EN) {
     const author = msg.member?.displayName || msg.author.username;
+    const header = '🇬🇧 **' + author + '** (English):';
     try {
-      const translated = await translate(msg.content, 'de', 'en');
-      await sendToChannel(
-        CROSS_DE,
-        '🇬🇧 **' + author + '** (English → German):\n' + translated,
-        'dedicated EN→DE'
-      );
-      console.log('Dedicated English message translated to German');
-    } catch (err) {
-      console.error('Dedicated EN→DE translation error:', err.message);
-    }
+      const [de, es, sk] = await translateTargets(msg.content, 'en', [
+        CROSS_DE ? 'de' : null,
+        CROSS_ES ? 'es' : null,
+        CROSS_SK ? 'sk' : null
+      ]);
+      await sendToChannel(CROSS_DE, header + '\n' + de, 'CROSS English→German');
+      await sendToChannel(CROSS_ES, header + '\n' + es, 'CROSS English→Spanish');
+      await sendToChannel(CROSS_SK, header + '\n' + sk, 'CROSS English→Slovak');
+      console.log('CROSS English message translated');
+    } catch (err) { console.error('CROSS English error:', err.message); }
   }
 
+  // Dedicated 4-way group: DE → EN, ES, SK
   if (CROSS_DE && msg.channelId === CROSS_DE) {
     const author = msg.member?.displayName || msg.author.username;
+    const header = '🇩🇪 **' + author + '** (German):';
     try {
-      const translated = await translate(msg.content, 'en', 'de');
-      await sendToChannel(
-        CROSS_EN,
-        '🇩🇪 **' + author + '** (German → English):\n' + translated,
-        'dedicated DE→EN'
-      );
-      console.log('Dedicated German message translated to English');
-    } catch (err) {
-      console.error('Dedicated DE→EN translation error:', err.message);
-    }
+      const [en, es, sk] = await translateTargets(msg.content, 'de', [
+        CROSS_EN ? 'en' : null,
+        CROSS_ES ? 'es' : null,
+        CROSS_SK ? 'sk' : null
+      ]);
+      await sendToChannel(CROSS_EN, header + '\n' + en, 'CROSS German→English');
+      await sendToChannel(CROSS_ES, header + '\n' + es, 'CROSS German→Spanish');
+      await sendToChannel(CROSS_SK, header + '\n' + sk, 'CROSS German→Slovak');
+      console.log('CROSS German message translated');
+    } catch (err) { console.error('CROSS German error:', err.message); }
+  }
+
+  // Dedicated 4-way group: ES → EN, DE, SK
+  if (CROSS_ES && msg.channelId === CROSS_ES) {
+    const author = msg.member?.displayName || msg.author.username;
+    const header = '🇪🇸 **' + author + '** (Spanish):';
+    try {
+      const [en, de, sk] = await translateTargets(msg.content, 'es', [
+        CROSS_EN ? 'en' : null,
+        CROSS_DE ? 'de' : null,
+        CROSS_SK ? 'sk' : null
+      ]);
+      await sendToChannel(CROSS_EN, header + '\n' + en, 'CROSS Spanish→English');
+      await sendToChannel(CROSS_DE, header + '\n' + de, 'CROSS Spanish→German');
+      await sendToChannel(CROSS_SK, header + '\n' + sk, 'CROSS Spanish→Slovak');
+      console.log('CROSS Spanish message translated');
+    } catch (err) { console.error('CROSS Spanish error:', err.message); }
+  }
+
+  // Dedicated 4-way group: SK → EN, DE, ES
+  if (CROSS_SK && msg.channelId === CROSS_SK) {
+    const author = msg.member?.displayName || msg.author.username;
+    const header = '🇸🇰 **' + author + '** (Slovak):';
+    try {
+      const [en, de, es] = await translateTargets(msg.content, 'sk', [
+        CROSS_EN ? 'en' : null,
+        CROSS_DE ? 'de' : null,
+        CROSS_ES ? 'es' : null
+      ]);
+      await sendToChannel(CROSS_EN, header + '\n' + en, 'CROSS Slovak→English');
+      await sendToChannel(CROSS_DE, header + '\n' + de, 'CROSS Slovak→German');
+      await sendToChannel(CROSS_ES, header + '\n' + es, 'CROSS Slovak→Spanish');
+      console.log('CROSS Slovak message translated');
+    } catch (err) { console.error('CROSS Slovak error:', err.message); }
   }
 
   // Leadership → German, Spanish & Slovak
