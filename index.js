@@ -5,6 +5,7 @@ const TOKEN = process.env.DISCORD_BOT_TOKEN;
 const LEADERSHIP = process.env.LEADERSHIP_CHANNEL_ID;
 const GERMAN = process.env.GERMAN_CHANNEL_ID;
 const SLOVAK = process.env.SLOVAK_CHANNEL_ID;
+const LEADERSHIP_SK = process.env.LEADERSHIP_SK_CHANNEL_ID;
 const DAILY_CHANNEL_ID = process.env.DAILY_CHANNEL_ID;
 const TBV_ROLE = '<@&1318114945149173825>';
 // Announcements channels
@@ -442,20 +443,22 @@ client.on('messageCreate', async (msg) => {
     }
   }
 
-  // Leadership → German & Spanish
+  // Leadership → German, Spanish & Slovak
   if (msg.channelId === LEADERSHIP) {
     console.log('Translating Leadership message from', msg.author.username);
     const author = msg.member?.displayName || msg.author.username;
     const header = '📢 **' + author + '** (Leadership):';
 
     try {
-      const [de, es] = await translateTargets(msg.content, 'en', [
+      const [de, es, sk] = await translateTargets(msg.content, 'en', [
         GERMAN ? 'de' : null,
-        SLOVAK ? 'es' : null
+        SLOVAK ? 'es' : null,
+        LEADERSHIP_SK ? 'sk' : null
       ]);
 
       await sendToChannel(GERMAN, header + '\n' + de, 'Leadership→German');
       await sendToChannel(SLOVAK, header + '\n' + es, 'Leadership→Spanish');
+      await sendToChannel(LEADERSHIP_SK, header + '\n' + sk, 'Leadership→Slovak');
 
       console.log('Translations posted successfully');
     } catch (err) {
@@ -502,6 +505,31 @@ client.on('messageCreate', async (msg) => {
       await sendToChannel(GERMAN, headerDe + '\n' + de, 'Spanish→German');
 
       console.log('Spanish message posted to Leadership and German');
+    } catch (err) {
+      console.error('Translation error:', err.message);
+    }
+  }
+
+  // Leadership Slovak leg → English, German & Spanish
+  if (LEADERSHIP_SK && msg.channelId === LEADERSHIP_SK) {
+    console.log('Translating Leadership Slovak message from', msg.author.username);
+    const author = msg.member?.displayName || msg.author.username;
+    const headerEn = '🇸🇰 **' + author + '** (Slovak):';
+    const headerDe = '🇸🇰 **' + author + '** (Slovak → German):';
+    const headerEs = '🇸🇰 **' + author + '** (Slovak → Spanish):';
+
+    try {
+      const [en, de, es] = await translateTargets(msg.content, 'sk', [
+        'en',
+        GERMAN ? 'de' : null,
+        SLOVAK ? 'es' : null
+      ]);
+
+      await sendToChannel(LEADERSHIP, headerEn + '\n' + en, 'LeadershipSK→Leadership');
+      await sendToChannel(GERMAN, headerDe + '\n' + de, 'LeadershipSK→German');
+      await sendToChannel(SLOVAK, headerEs + '\n' + es, 'LeadershipSK→Spanish');
+
+      console.log('Leadership Slovak message posted to Leadership, German and Spanish');
     } catch (err) {
       console.error('Translation error:', err.message);
     }
