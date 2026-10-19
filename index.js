@@ -472,17 +472,20 @@ client.on('messageCreate', async (msg) => {
     const author = msg.member?.displayName || msg.author.username;
     const headerEn = '🇩🇪 **' + author + '** (German):';
     const headerEs = '🇩🇪 **' + author + '** (German → Spanish):';
+    const headerSk = '🇩🇪 **' + author + '** (German → Slovak):';
 
     try {
-      const [en, es] = await translateTargets(msg.content, 'de', [
+      const [en, es, sk] = await translateTargets(msg.content, 'de', [
         'en',
-        SLOVAK ? 'es' : null
+        SLOVAK ? 'es' : null,
+        LEADERSHIP_SK ? 'sk' : null
       ]);
 
       await sendToChannel(LEADERSHIP, headerEn + '\n' + en, 'German→Leadership');
       await sendToChannel(SLOVAK, headerEs + '\n' + es, 'German→Spanish');
+      await sendToChannel(LEADERSHIP_SK, headerSk + '\n' + sk, 'German→Slovak');
 
-      console.log('German message posted to Leadership and Spanish');
+      console.log('German message posted to Leadership, Spanish and Slovak');
     } catch (err) {
       console.error('Translation error:', err.message);
     }
@@ -494,17 +497,20 @@ client.on('messageCreate', async (msg) => {
     const author = msg.member?.displayName || msg.author.username;
     const headerEn = '🇪🇸 **' + author + '** (Spanish):';
     const headerDe = '🇪🇸 **' + author + '** (Spanish → German):';
+    const headerSk = '🇪🇸 **' + author + '** (Spanish → Slovak):';
 
     try {
-      const [en, de] = await translateTargets(msg.content, 'es', [
+      const [en, de, sk] = await translateTargets(msg.content, 'es', [
         'en',
-        GERMAN ? 'de' : null
+        GERMAN ? 'de' : null,
+        LEADERSHIP_SK ? 'sk' : null
       ]);
 
       await sendToChannel(LEADERSHIP, headerEn + '\n' + en, 'Spanish→Leadership');
       await sendToChannel(GERMAN, headerDe + '\n' + de, 'Spanish→German');
+      await sendToChannel(LEADERSHIP_SK, headerSk + '\n' + sk, 'Spanish→Slovak');
 
-      console.log('Spanish message posted to Leadership and German');
+      console.log('Spanish message posted to Leadership, German and Slovak');
     } catch (err) {
       console.error('Translation error:', err.message);
     }
