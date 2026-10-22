@@ -35,7 +35,38 @@ if (!TOKEN) {
 
 const MYMEMORY_TRANSLATE_URL = 'https://api.mymemory.translated.net/get';
 const TRANSLATION_TIMEOUT_MS = 15000;
-const TRANSLATION_ATTEMPTS = 3;
+const TRANSLATION_MAX_ATTEMPTS = 4;
+const TRANSLATION_BASE_DELAY_MS = 1000;
+const TRANSLATION_MAX_BACKOFF_MS = 30000;
+const TRANSLATION_MAX_RETRY_AFTER_MS = 60000;
+const TRANSLATION_GAP_MS = 500; // pause between consecutive provider requests
+const UNAVAILABLE_NOTE = '_(translation unavailable)_';
+
+class TranslationError extends Error {
+  constructor(message, { retryable, retryAfterMs = null } = {}) {
+    super(message);
+    this.name = 'TranslationError';
+    this.retryable = retryable;
+    this.retryAfterMs = retryAfterMs;
+  }
+}
+
+const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+
+// Retry-After is either delta-seconds or an HTTP-date.
+function parseRetryAfterMs(value) {
+  if (!value) return null;
+  const seconds = Number(value);
+  if (Number.isFinite(seconds)) return Math.max(0, seconds * 1000);
+  const date = Date.parse(value);
+  return Number.isNaN(date) ? null : Math.max(0, date - Date.now());
+}
+
+// Exponential backoff with full jitter. Retry-After, when present, is a floor.
+function retryDelayMs(attempt, retryAfterMs) {
+  const exp = Math.min(TRANSLATION_MAX_BACKOFF_MS, TRANSLATION_BASE_DELAY_MS * 2 ** (attempt - 1));
+  return Math.round((retryAfterMs ?? 0) + Math.random() * exp);
+}
 
 function detectSourceLanguage(text) {
   const lower = text.toLowerCase();
@@ -46,9 +77,7 @@ function detectSourceLanguage(text) {
   return 'en';
 }
 
-async function translateOnce(text, lang, sourceLang = detectSourceLanguage(text)) {
-  if (sourceLang === lang) return text;
-
+async function translateOnce(text, lang, sourceLang) {
   const params = new URLSearchParams({
     q: text,
     langpair: sourceLang + '|' + lang,
@@ -57,85 +86,128 @@ async function translateOnce(text, lang, sourceLang = detectSourceLanguage(text)
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), TRANSLATION_TIMEOUT_MS);
 
-  let res;
   try {
-    res = await fetch(MYMEMORY_TRANSLATE_URL + '?' + params.toString(), {
+    const res = await fetch(MYMEMORY_TRANSLATE_URL + '?' + params.toString(), {
       signal: controller.signal,
       headers: {
         Accept: 'application/json',
         'User-Agent': 'DiscordTranslationBot/1.0'
       }
     });
+
+    if (!res.ok) {
+      throw new TranslationError('Translation request failed: ' + res.status + ' ' + res.statusText, {
+        retryable: res.status === 429 || res.status >= 500,
+        retryAfterMs: parseRetryAfterMs(res.headers.get('retry-after'))
+      });
+    }
+
+    const contentType = res.headers.get('content-type') || '';
+    if (!contentType.includes('application/json')) {
+      const body = await res.text();
+      throw new TranslationError(
+        'Translation provider returned non-JSON response: ' +
+        res.status + ' ' + body.slice(0, 120).replace(/\s+/g, ' '),
+        { retryable: true }
+      );
+    }
+
+    const data = await res.json();
+    if (data?.quotaFinished) {
+      throw new TranslationError('Translation provider quota is exhausted', { retryable: false });
+    }
+    if (Number(data?.responseStatus) === 429) {
+      throw new TranslationError('Translation provider rate limited (responseStatus 429)', { retryable: true });
+    }
+    const translated = typeof data?.responseData?.translatedText === 'string'
+      ? data.responseData.translatedText.trim()
+      : '';
+    if (Number(data?.responseStatus) !== 200 || !translated) {
+      throw new TranslationError('Empty or invalid translation response', { retryable: true });
+    }
+    return translated;
+  } catch (err) {
+    if (err instanceof TranslationError) throw err;
+    const reason = err?.name === 'AbortError' ? 'timed out' : (err?.message || String(err));
+    throw new TranslationError('Translation request error: ' + reason, { retryable: true });
   } finally {
     clearTimeout(timeout);
   }
-
-  if (!res.ok) {
-    throw new Error('Translation request failed: ' + res.status + ' ' + res.statusText);
-  }
-
-  const contentType = res.headers.get('content-type') || '';
-  if (!contentType.includes('application/json')) {
-    const body = await res.text();
-    throw new Error(
-      'Translation provider returned non-JSON response: ' +
-      res.status +
-      ' ' +
-      body.slice(0, 120).replace(/\s+/g, ' ')
-    );
-  }
-
-  const data = await res.json();
-  const translated = data?.responseData?.translatedText?.trim();
-  if (data?.quotaFinished) throw new Error('Translation provider quota is exhausted');
-  if (data?.responseStatus !== 200 || !translated) {
-    throw new Error('Empty or invalid translation response');
-  }
-  return translated;
 }
 
 async function translate(text, lang, sourceLang = detectSourceLanguage(text)) {
-  let lastError;
+  if (sourceLang === lang) return text;
 
-  for (let attempt = 1; attempt <= TRANSLATION_ATTEMPTS; attempt++) {
+  let lastError;
+  for (let attempt = 1; attempt <= TRANSLATION_MAX_ATTEMPTS; attempt++) {
     try {
       return await translateOnce(text, lang, sourceLang);
     } catch (err) {
       lastError = err;
-      if (attempt === TRANSLATION_ATTEMPTS) break;
-      const delayMs = attempt * 1500;
-      console.warn('Translation attempt ' + attempt + ' failed for ' + lang + '; retrying in ' + delayMs + 'ms');
-      await new Promise(resolve => setTimeout(resolve, delayMs));
+      const retryable = err instanceof TranslationError && err.retryable;
+      if (!retryable || attempt === TRANSLATION_MAX_ATTEMPTS) break;
+      if (err.retryAfterMs > TRANSLATION_MAX_RETRY_AFTER_MS) break;
+      const delayMs = retryDelayMs(attempt, err.retryAfterMs);
+      console.warn(
+        'Translation attempt ' + attempt + ' failed for ' + sourceLang + '→' + lang +
+        ' (' + err.message + '); retrying in ' + delayMs + 'ms'
+      );
+      await sleep(delayMs);
     }
   }
-
-  throw lastError instanceof Error
-    ? lastError
-    : new Error('Translation failed after retries');
+  throw lastError;
 }
 
-async function translateTargets(text, sourceLang, targetLangs) {
-  return Promise.all(targetLangs.map(async (targetLang) => {
-    if (!targetLang) return '';
+// Global FIFO: every translation request in the bot runs one at a time.
+let translationQueue = Promise.resolve();
+function enqueueTranslation(job) {
+  const run = translationQueue.then(job);
+  translationQueue = run.catch(() => {});
+  return run;
+}
 
-    try {
-      return await translate(text, targetLang, sourceLang);
-    } catch (err) {
-      console.error(
-        'Translation failed for ' + sourceLang + '→' + targetLang + ':',
-        err instanceof Error ? err.message : err
-      );
-      return '';
+// Returns one entry per target language: the translated text, or null if unavailable.
+function translateTargets(text, sourceLang, targetLangs) {
+  return enqueueTranslation(async () => {
+    const hasText = typeof text === 'string' && text.trim() !== '';
+    const results = [];
+    for (const targetLang of targetLangs) {
+      if (!targetLang || !hasText) {
+        results.push(null);
+        continue;
+      }
+      try {
+        results.push(await translate(text, targetLang, sourceLang));
+      } catch (err) {
+        console.error(
+          'Translation unavailable for ' + sourceLang + '→' + targetLang + ': ' +
+          (err instanceof Error ? err.message : err)
+        );
+        results.push(null);
+      }
+      await sleep(TRANSLATION_GAP_MS);
     }
-  }));
+    return results;
+  });
+}
+
+// Header plus translation; a missing translation becomes a short note, never an empty body.
+function withBody(header, body) {
+  return header + '\n' + (body || UNAVAILABLE_NOTE);
 }
 
 async function sendToChannel(channelId, content, label) {
-  if (!channelId || !content) return false;
+  if (!channelId) return false;
+  if (!content || !content.trim()) {
+    console.error('Not posting empty ' + label + ' message');
+    return false;
+  }
+  const missing = content.includes(UNAVAILABLE_NOTE);
 
   try {
     const channel = await client.channels.fetch(channelId);
     await channel.send(content);
+    console.log('Posted ' + label + (missing ? ' (translation unavailable)' : ''));
     return true;
   } catch (err) {
     console.error(
@@ -145,6 +217,7 @@ async function sendToChannel(channelId, content, label) {
     return false;
   }
 }
+
 
 const DAILY_MESSAGES = {
   0: `🔷 SUNDAY – Pregathering day (CRITICAL)
@@ -250,18 +323,17 @@ async function postDailySchedule() {
     const nextDay = (now.getDay() + 1) % 7;
     const message = DAILY_MESSAGES[nextDay];
     const enMsg = TBV_ROLE + '\n' + message;
-    if (DAILY_CHANNEL_ID) { const ch = await client.channels.fetch(DAILY_CHANNEL_ID); await ch.send(enMsg); }
+    await sendToChannel(DAILY_CHANNEL_ID, enMsg || UNAVAILABLE_NOTE, 'DAILY_CHANNEL_ID');
     const langs = await translateTargets(message, 'en', [
       ANN_DE ? 'de' : null,
       ANN_SK ? 'sk' : null,
       ANN_FR ? 'fr' : null,
       ANN_ES ? 'es' : null
     ]);
-    if (ANN_DE) { const ch2 = await client.channels.fetch(ANN_DE); await ch2.send(langs[0]); }
-    if (ANN_SK) { const ch2 = await client.channels.fetch(ANN_SK); await ch2.send(langs[1]); }
-    if (ANN_FR) { const ch2 = await client.channels.fetch(ANN_FR); await ch2.send(langs[2]); }
-    if (ANN_ES) { const ch2 = await client.channels.fetch(ANN_ES); await ch2.send(langs[3]); }
-    console.log('Daily schedule posted to all language channels');
+    await sendToChannel(ANN_DE, langs[0] || UNAVAILABLE_NOTE, 'ANN_DE');
+    await sendToChannel(ANN_SK, langs[1] || UNAVAILABLE_NOTE, 'ANN_SK');
+    await sendToChannel(ANN_FR, langs[2] || UNAVAILABLE_NOTE, 'ANN_FR');
+    await sendToChannel(ANN_ES, langs[3] || UNAVAILABLE_NOTE, 'ANN_ES');
   } catch (err) {
     console.error('Failed to post daily schedule:', err.message);
   }
@@ -277,11 +349,10 @@ async function postZombieRaidReminder() {
       ANN_FR ? 'fr' : null,
       ANN_ES ? 'es' : null
     ]);
-    if (ANN_DE) { const ch2 = await client.channels.fetch(ANN_DE); await ch2.send(langs[0]); }
-    if (ANN_SK) { const ch2 = await client.channels.fetch(ANN_SK); await ch2.send(langs[1]); }
-    if (ANN_FR) { const ch2 = await client.channels.fetch(ANN_FR); await ch2.send(langs[2]); }
-    if (ANN_ES) { const ch2 = await client.channels.fetch(ANN_ES); await ch2.send(langs[3]); }
-    console.log('Zombie raid reminder posted to all language channels');
+    await sendToChannel(ANN_DE, langs[0] || UNAVAILABLE_NOTE, 'ANN_DE');
+    await sendToChannel(ANN_SK, langs[1] || UNAVAILABLE_NOTE, 'ANN_SK');
+    await sendToChannel(ANN_FR, langs[2] || UNAVAILABLE_NOTE, 'ANN_FR');
+    await sendToChannel(ANN_ES, langs[3] || UNAVAILABLE_NOTE, 'ANN_ES');
   } catch (err) {
     console.error('Failed to post zombie raid reminder:', err.message);
   }
@@ -297,11 +368,10 @@ async function postSecondZombieRaidReminder() {
       ANN_FR ? 'fr' : null,
       ANN_ES ? 'es' : null
     ]);
-    if (ANN_DE) { const ch2 = await client.channels.fetch(ANN_DE); await ch2.send(langs[0]); }
-    if (ANN_SK) { const ch2 = await client.channels.fetch(ANN_SK); await ch2.send(langs[1]); }
-    if (ANN_FR) { const ch2 = await client.channels.fetch(ANN_FR); await ch2.send(langs[2]); }
-    if (ANN_ES) { const ch2 = await client.channels.fetch(ANN_ES); await ch2.send(langs[3]); }
-    console.log('Second zombie raid reminder posted to all language channels');
+    await sendToChannel(ANN_DE, langs[0] || UNAVAILABLE_NOTE, 'ANN_DE');
+    await sendToChannel(ANN_SK, langs[1] || UNAVAILABLE_NOTE, 'ANN_SK');
+    await sendToChannel(ANN_FR, langs[2] || UNAVAILABLE_NOTE, 'ANN_FR');
+    await sendToChannel(ANN_ES, langs[3] || UNAVAILABLE_NOTE, 'ANN_ES');
   } catch (err) {
     console.error('Failed to post second zombie raid reminder:', err.message);
   }
@@ -310,18 +380,17 @@ async function postSecondZombieRaidReminder() {
 async function postLevel11Bauxite() {
   try {
     const text = '\u26CF\uFE0F You can now start pre-gathering a level 11 bauxite mine';
-    if (DAILY_CHANNEL_ID) { const ch = await client.channels.fetch(DAILY_CHANNEL_ID); await ch.send(text); }
+    await sendToChannel(DAILY_CHANNEL_ID, text || UNAVAILABLE_NOTE, 'DAILY_CHANNEL_ID');
     const langs = await translateTargets(text, 'en', [
       ANN_DE ? 'de' : null,
       ANN_SK ? 'sk' : null,
       ANN_FR ? 'fr' : null,
       ANN_ES ? 'es' : null
     ]);
-    if (ANN_DE) { const ch2 = await client.channels.fetch(ANN_DE); await ch2.send(langs[0]); }
-    if (ANN_SK) { const ch2 = await client.channels.fetch(ANN_SK); await ch2.send(langs[1]); }
-    if (ANN_FR) { const ch2 = await client.channels.fetch(ANN_FR); await ch2.send(langs[2]); }
-    if (ANN_ES) { const ch2 = await client.channels.fetch(ANN_ES); await ch2.send(langs[3]); }
-    console.log('Level 11 bauxite posted to all language channels');
+    await sendToChannel(ANN_DE, langs[0] || UNAVAILABLE_NOTE, 'ANN_DE');
+    await sendToChannel(ANN_SK, langs[1] || UNAVAILABLE_NOTE, 'ANN_SK');
+    await sendToChannel(ANN_FR, langs[2] || UNAVAILABLE_NOTE, 'ANN_FR');
+    await sendToChannel(ANN_ES, langs[3] || UNAVAILABLE_NOTE, 'ANN_ES');
   } catch (err) {
     console.error('Failed to post level 11 bauxite reminder:', err.message);
   }
@@ -330,18 +399,17 @@ async function postLevel11Bauxite() {
 async function postLevel10Bauxite() {
   try {
     const text = '\u26CF\uFE0F You can now start pre-gathering a level 10 bauxite mine';
-    if (DAILY_CHANNEL_ID) { const ch = await client.channels.fetch(DAILY_CHANNEL_ID); await ch.send(text); }
+    await sendToChannel(DAILY_CHANNEL_ID, text || UNAVAILABLE_NOTE, 'DAILY_CHANNEL_ID');
     const langs = await translateTargets(text, 'en', [
       ANN_DE ? 'de' : null,
       ANN_SK ? 'sk' : null,
       ANN_FR ? 'fr' : null,
       ANN_ES ? 'es' : null
     ]);
-    if (ANN_DE) { const ch2 = await client.channels.fetch(ANN_DE); await ch2.send(langs[0]); }
-    if (ANN_SK) { const ch2 = await client.channels.fetch(ANN_SK); await ch2.send(langs[1]); }
-    if (ANN_FR) { const ch2 = await client.channels.fetch(ANN_FR); await ch2.send(langs[2]); }
-    if (ANN_ES) { const ch2 = await client.channels.fetch(ANN_ES); await ch2.send(langs[3]); }
-    console.log('Level 10 bauxite posted to all language channels');
+    await sendToChannel(ANN_DE, langs[0] || UNAVAILABLE_NOTE, 'ANN_DE');
+    await sendToChannel(ANN_SK, langs[1] || UNAVAILABLE_NOTE, 'ANN_SK');
+    await sendToChannel(ANN_FR, langs[2] || UNAVAILABLE_NOTE, 'ANN_FR');
+    await sendToChannel(ANN_ES, langs[3] || UNAVAILABLE_NOTE, 'ANN_ES');
   } catch (err) {
     console.error('Failed to post level 10 bauxite reminder:', err.message);
   }
@@ -350,18 +418,17 @@ async function postLevel10Bauxite() {
 async function postLevel9Bauxite() {
   try {
     const text = '\u26CF\uFE0F You can now start pre-gathering a level 9 bauxite mine';
-    if (DAILY_CHANNEL_ID) { const ch = await client.channels.fetch(DAILY_CHANNEL_ID); await ch.send(text); }
+    await sendToChannel(DAILY_CHANNEL_ID, text || UNAVAILABLE_NOTE, 'DAILY_CHANNEL_ID');
     const langs = await translateTargets(text, 'en', [
       ANN_DE ? 'de' : null,
       ANN_SK ? 'sk' : null,
       ANN_FR ? 'fr' : null,
       ANN_ES ? 'es' : null
     ]);
-    if (ANN_DE) { const ch2 = await client.channels.fetch(ANN_DE); await ch2.send(langs[0]); }
-    if (ANN_SK) { const ch2 = await client.channels.fetch(ANN_SK); await ch2.send(langs[1]); }
-    if (ANN_FR) { const ch2 = await client.channels.fetch(ANN_FR); await ch2.send(langs[2]); }
-    if (ANN_ES) { const ch2 = await client.channels.fetch(ANN_ES); await ch2.send(langs[3]); }
-    console.log('Level 9 bauxite posted to all language channels');
+    await sendToChannel(ANN_DE, langs[0] || UNAVAILABLE_NOTE, 'ANN_DE');
+    await sendToChannel(ANN_SK, langs[1] || UNAVAILABLE_NOTE, 'ANN_SK');
+    await sendToChannel(ANN_FR, langs[2] || UNAVAILABLE_NOTE, 'ANN_FR');
+    await sendToChannel(ANN_ES, langs[3] || UNAVAILABLE_NOTE, 'ANN_ES');
   } catch (err) {
     console.error('Failed to post level 9 bauxite reminder:', err.message);
   }
@@ -424,10 +491,9 @@ client.on('messageCreate', async (msg) => {
         CROSS_ES ? 'es' : null,
         CROSS_SK ? 'sk' : null
       ]);
-      await sendToChannel(CROSS_DE, header + '\n' + de, 'CROSS English→German');
-      await sendToChannel(CROSS_ES, header + '\n' + es, 'CROSS English→Spanish');
-      await sendToChannel(CROSS_SK, header + '\n' + sk, 'CROSS English→Slovak');
-      console.log('CROSS English message translated');
+      await sendToChannel(CROSS_DE, withBody(header, de), 'CROSS English→German');
+      await sendToChannel(CROSS_ES, withBody(header, es), 'CROSS English→Spanish');
+      await sendToChannel(CROSS_SK, withBody(header, sk), 'CROSS English→Slovak');
     } catch (err) { console.error('CROSS English error:', err.message); }
   }
 
@@ -441,10 +507,9 @@ client.on('messageCreate', async (msg) => {
         CROSS_ES ? 'es' : null,
         CROSS_SK ? 'sk' : null
       ]);
-      await sendToChannel(CROSS_EN, header + '\n' + en, 'CROSS German→English');
-      await sendToChannel(CROSS_ES, header + '\n' + es, 'CROSS German→Spanish');
-      await sendToChannel(CROSS_SK, header + '\n' + sk, 'CROSS German→Slovak');
-      console.log('CROSS German message translated');
+      await sendToChannel(CROSS_EN, withBody(header, en), 'CROSS German→English');
+      await sendToChannel(CROSS_ES, withBody(header, es), 'CROSS German→Spanish');
+      await sendToChannel(CROSS_SK, withBody(header, sk), 'CROSS German→Slovak');
     } catch (err) { console.error('CROSS German error:', err.message); }
   }
 
@@ -458,10 +523,9 @@ client.on('messageCreate', async (msg) => {
         CROSS_DE ? 'de' : null,
         CROSS_SK ? 'sk' : null
       ]);
-      await sendToChannel(CROSS_EN, header + '\n' + en, 'CROSS Spanish→English');
-      await sendToChannel(CROSS_DE, header + '\n' + de, 'CROSS Spanish→German');
-      await sendToChannel(CROSS_SK, header + '\n' + sk, 'CROSS Spanish→Slovak');
-      console.log('CROSS Spanish message translated');
+      await sendToChannel(CROSS_EN, withBody(header, en), 'CROSS Spanish→English');
+      await sendToChannel(CROSS_DE, withBody(header, de), 'CROSS Spanish→German');
+      await sendToChannel(CROSS_SK, withBody(header, sk), 'CROSS Spanish→Slovak');
     } catch (err) { console.error('CROSS Spanish error:', err.message); }
   }
 
@@ -475,10 +539,9 @@ client.on('messageCreate', async (msg) => {
         CROSS_DE ? 'de' : null,
         CROSS_ES ? 'es' : null
       ]);
-      await sendToChannel(CROSS_EN, header + '\n' + en, 'CROSS Slovak→English');
-      await sendToChannel(CROSS_DE, header + '\n' + de, 'CROSS Slovak→German');
-      await sendToChannel(CROSS_ES, header + '\n' + es, 'CROSS Slovak→Spanish');
-      console.log('CROSS Slovak message translated');
+      await sendToChannel(CROSS_EN, withBody(header, en), 'CROSS Slovak→English');
+      await sendToChannel(CROSS_DE, withBody(header, de), 'CROSS Slovak→German');
+      await sendToChannel(CROSS_ES, withBody(header, es), 'CROSS Slovak→Spanish');
     } catch (err) { console.error('CROSS Slovak error:', err.message); }
   }
 
@@ -495,11 +558,10 @@ client.on('messageCreate', async (msg) => {
         LEADERSHIP_SK ? 'sk' : null
       ]);
 
-      await sendToChannel(GERMAN, header + '\n' + de, 'Leadership→German');
-      await sendToChannel(SLOVAK, header + '\n' + es, 'Leadership→Spanish');
-      await sendToChannel(LEADERSHIP_SK, header + '\n' + sk, 'Leadership→Slovak');
+      await sendToChannel(GERMAN, withBody(header, de), 'Leadership→German');
+      await sendToChannel(SLOVAK, withBody(header, es), 'Leadership→Spanish');
+      await sendToChannel(LEADERSHIP_SK, withBody(header, sk), 'Leadership→Slovak');
 
-      console.log('Translations posted successfully');
     } catch (err) {
       console.error('Translation error:', err.message);
     }
@@ -520,11 +582,10 @@ client.on('messageCreate', async (msg) => {
         LEADERSHIP_SK ? 'sk' : null
       ]);
 
-      await sendToChannel(LEADERSHIP, headerEn + '\n' + en, 'German→Leadership');
-      await sendToChannel(SLOVAK, headerEs + '\n' + es, 'German→Spanish');
-      await sendToChannel(LEADERSHIP_SK, headerSk + '\n' + sk, 'German→Slovak');
+      await sendToChannel(LEADERSHIP, withBody(headerEn, en), 'German→Leadership');
+      await sendToChannel(SLOVAK, withBody(headerEs, es), 'German→Spanish');
+      await sendToChannel(LEADERSHIP_SK, withBody(headerSk, sk), 'German→Slovak');
 
-      console.log('German message posted to Leadership, Spanish and Slovak');
     } catch (err) {
       console.error('Translation error:', err.message);
     }
@@ -545,11 +606,10 @@ client.on('messageCreate', async (msg) => {
         LEADERSHIP_SK ? 'sk' : null
       ]);
 
-      await sendToChannel(LEADERSHIP, headerEn + '\n' + en, 'Spanish→Leadership');
-      await sendToChannel(GERMAN, headerDe + '\n' + de, 'Spanish→German');
-      await sendToChannel(LEADERSHIP_SK, headerSk + '\n' + sk, 'Spanish→Slovak');
+      await sendToChannel(LEADERSHIP, withBody(headerEn, en), 'Spanish→Leadership');
+      await sendToChannel(GERMAN, withBody(headerDe, de), 'Spanish→German');
+      await sendToChannel(LEADERSHIP_SK, withBody(headerSk, sk), 'Spanish→Slovak');
 
-      console.log('Spanish message posted to Leadership, German and Slovak');
     } catch (err) {
       console.error('Translation error:', err.message);
     }
@@ -570,11 +630,10 @@ client.on('messageCreate', async (msg) => {
         SLOVAK ? 'es' : null
       ]);
 
-      await sendToChannel(LEADERSHIP, headerEn + '\n' + en, 'LeadershipSK→Leadership');
-      await sendToChannel(GERMAN, headerDe + '\n' + de, 'LeadershipSK→German');
-      await sendToChannel(SLOVAK, headerEs + '\n' + es, 'LeadershipSK→Spanish');
+      await sendToChannel(LEADERSHIP, withBody(headerEn, en), 'LeadershipSK→Leadership');
+      await sendToChannel(GERMAN, withBody(headerDe, de), 'LeadershipSK→German');
+      await sendToChannel(SLOVAK, withBody(headerEs, es), 'LeadershipSK→Spanish');
 
-      console.log('Leadership Slovak message posted to Leadership, German and Spanish');
     } catch (err) {
       console.error('Translation error:', err.message);
     }
@@ -592,11 +651,10 @@ client.on('messageCreate', async (msg) => {
         ANN_FR ? 'fr' : null,
         ANN_ES ? 'es' : null
       ]);
-      await sendToChannel(ANN_DE, header + '\n' + results[0], 'ANN_EN→German');
-      await sendToChannel(ANN_SK, header + '\n' + results[1], 'ANN_EN→Slovak');
-      await sendToChannel(ANN_FR, header + '\n' + results[2], 'ANN_EN→French');
-      await sendToChannel(ANN_ES, header + '\n' + results[3], 'ANN_EN→Spanish');
-      console.log('ANN_EN translated');
+      await sendToChannel(ANN_DE, withBody(header, results[0]), 'ANN_EN→German');
+      await sendToChannel(ANN_SK, withBody(header, results[1]), 'ANN_EN→Slovak');
+      await sendToChannel(ANN_FR, withBody(header, results[2]), 'ANN_EN→French');
+      await sendToChannel(ANN_ES, withBody(header, results[3]), 'ANN_EN→Spanish');
     } catch (err) { console.error('ANN_EN error:', err.message); }
   }
 
@@ -611,11 +669,10 @@ client.on('messageCreate', async (msg) => {
         ANN_FR ? 'fr' : null,
         ANN_ES ? 'es' : null
       ]);
-      await sendToChannel(ANN_EN, header + '\n' + results[0], 'ANN_DE→English');
-      await sendToChannel(ANN_SK, header + '\n' + results[1], 'ANN_DE→Slovak');
-      await sendToChannel(ANN_FR, header + '\n' + results[2], 'ANN_DE→French');
-      await sendToChannel(ANN_ES, header + '\n' + results[3], 'ANN_DE→Spanish');
-      console.log('ANN_DE translated');
+      await sendToChannel(ANN_EN, withBody(header, results[0]), 'ANN_DE→English');
+      await sendToChannel(ANN_SK, withBody(header, results[1]), 'ANN_DE→Slovak');
+      await sendToChannel(ANN_FR, withBody(header, results[2]), 'ANN_DE→French');
+      await sendToChannel(ANN_ES, withBody(header, results[3]), 'ANN_DE→Spanish');
     } catch (err) { console.error('ANN_DE error:', err.message); }
   }
 
@@ -630,11 +687,10 @@ client.on('messageCreate', async (msg) => {
         ANN_FR ? 'fr' : null,
         ANN_ES ? 'es' : null
       ]);
-      await sendToChannel(ANN_EN, header + '\n' + results[0], 'ANN_SK→English');
-      await sendToChannel(ANN_DE, header + '\n' + results[1], 'ANN_SK→German');
-      await sendToChannel(ANN_FR, header + '\n' + results[2], 'ANN_SK→French');
-      await sendToChannel(ANN_ES, header + '\n' + results[3], 'ANN_SK→Spanish');
-      console.log('ANN_SK translated');
+      await sendToChannel(ANN_EN, withBody(header, results[0]), 'ANN_SK→English');
+      await sendToChannel(ANN_DE, withBody(header, results[1]), 'ANN_SK→German');
+      await sendToChannel(ANN_FR, withBody(header, results[2]), 'ANN_SK→French');
+      await sendToChannel(ANN_ES, withBody(header, results[3]), 'ANN_SK→Spanish');
     } catch (err) { console.error('ANN_SK error:', err.message); }
   }
 
@@ -649,11 +705,10 @@ client.on('messageCreate', async (msg) => {
         ANN_SK ? 'sk' : null,
         ANN_ES ? 'es' : null
       ]);
-      await sendToChannel(ANN_EN, header + '\n' + results[0], 'ANN_FR→English');
-      await sendToChannel(ANN_DE, header + '\n' + results[1], 'ANN_FR→German');
-      await sendToChannel(ANN_SK, header + '\n' + results[2], 'ANN_FR→Slovak');
-      await sendToChannel(ANN_ES, header + '\n' + results[3], 'ANN_FR→Spanish');
-      console.log('ANN_FR translated');
+      await sendToChannel(ANN_EN, withBody(header, results[0]), 'ANN_FR→English');
+      await sendToChannel(ANN_DE, withBody(header, results[1]), 'ANN_FR→German');
+      await sendToChannel(ANN_SK, withBody(header, results[2]), 'ANN_FR→Slovak');
+      await sendToChannel(ANN_ES, withBody(header, results[3]), 'ANN_FR→Spanish');
     } catch (err) { console.error('ANN_FR error:', err.message); }
   }
 
@@ -669,11 +724,10 @@ client.on('messageCreate', async (msg) => {
         GEN_FR ? 'fr' : null,
         GEN_ES ? 'es' : null
       ]);
-      await sendToChannel(GEN_DE, header + '\n' + results[0], 'GEN_EN→German');
-      await sendToChannel(GEN_SK, header + '\n' + results[1], 'GEN_EN→Slovak');
-      await sendToChannel(GEN_FR, header + '\n' + results[2], 'GEN_EN→French');
-      await sendToChannel(GEN_ES, header + '\n' + results[3], 'GEN_EN→Spanish');
-      console.log('GEN_EN translated');
+      await sendToChannel(GEN_DE, withBody(header, results[0]), 'GEN_EN→German');
+      await sendToChannel(GEN_SK, withBody(header, results[1]), 'GEN_EN→Slovak');
+      await sendToChannel(GEN_FR, withBody(header, results[2]), 'GEN_EN→French');
+      await sendToChannel(GEN_ES, withBody(header, results[3]), 'GEN_EN→Spanish');
     } catch (err) { console.error('GEN_EN error:', err.message); }
   }
 
@@ -688,11 +742,10 @@ client.on('messageCreate', async (msg) => {
         GEN_FR ? 'fr' : null,
         GEN_ES ? 'es' : null
       ]);
-      await sendToChannel(GEN_EN, header + '\n' + results[0], 'GEN_DE→English');
-      await sendToChannel(GEN_SK, header + '\n' + results[1], 'GEN_DE→Slovak');
-      await sendToChannel(GEN_FR, header + '\n' + results[2], 'GEN_DE→French');
-      await sendToChannel(GEN_ES, header + '\n' + results[3], 'GEN_DE→Spanish');
-      console.log('GEN_DE translated');
+      await sendToChannel(GEN_EN, withBody(header, results[0]), 'GEN_DE→English');
+      await sendToChannel(GEN_SK, withBody(header, results[1]), 'GEN_DE→Slovak');
+      await sendToChannel(GEN_FR, withBody(header, results[2]), 'GEN_DE→French');
+      await sendToChannel(GEN_ES, withBody(header, results[3]), 'GEN_DE→Spanish');
     } catch (err) { console.error('GEN_DE error:', err.message); }
   }
 
@@ -707,11 +760,10 @@ client.on('messageCreate', async (msg) => {
         GEN_FR ? 'fr' : null,
         GEN_ES ? 'es' : null
       ]);
-      await sendToChannel(GEN_EN, header + '\n' + results[0], 'GEN_SK→English');
-      await sendToChannel(GEN_DE, header + '\n' + results[1], 'GEN_SK→German');
-      await sendToChannel(GEN_FR, header + '\n' + results[2], 'GEN_SK→French');
-      await sendToChannel(GEN_ES, header + '\n' + results[3], 'GEN_SK→Spanish');
-      console.log('GEN_SK translated');
+      await sendToChannel(GEN_EN, withBody(header, results[0]), 'GEN_SK→English');
+      await sendToChannel(GEN_DE, withBody(header, results[1]), 'GEN_SK→German');
+      await sendToChannel(GEN_FR, withBody(header, results[2]), 'GEN_SK→French');
+      await sendToChannel(GEN_ES, withBody(header, results[3]), 'GEN_SK→Spanish');
     } catch (err) { console.error('GEN_SK error:', err.message); }
   }
 
@@ -726,11 +778,10 @@ client.on('messageCreate', async (msg) => {
         GEN_SK ? 'sk' : null,
         GEN_ES ? 'es' : null
       ]);
-      await sendToChannel(GEN_EN, header + '\n' + results[0], 'GEN_FR→English');
-      await sendToChannel(GEN_DE, header + '\n' + results[1], 'GEN_FR→German');
-      await sendToChannel(GEN_SK, header + '\n' + results[2], 'GEN_FR→Slovak');
-      await sendToChannel(GEN_ES, header + '\n' + results[3], 'GEN_FR→Spanish');
-      console.log('GEN_FR translated');
+      await sendToChannel(GEN_EN, withBody(header, results[0]), 'GEN_FR→English');
+      await sendToChannel(GEN_DE, withBody(header, results[1]), 'GEN_FR→German');
+      await sendToChannel(GEN_SK, withBody(header, results[2]), 'GEN_FR→Slovak');
+      await sendToChannel(GEN_ES, withBody(header, results[3]), 'GEN_FR→Spanish');
     } catch (err) { console.error('GEN_FR error:', err.message); }
   }
 
@@ -745,11 +796,10 @@ client.on('messageCreate', async (msg) => {
         ANN_SK ? 'sk' : null,
         ANN_FR ? 'fr' : null
       ]);
-      await sendToChannel(ANN_EN, header + '\n' + results[0], 'ANN_ES→English');
-      await sendToChannel(ANN_DE, header + '\n' + results[1], 'ANN_ES→German');
-      await sendToChannel(ANN_SK, header + '\n' + results[2], 'ANN_ES→Slovak');
-      await sendToChannel(ANN_FR, header + '\n' + results[3], 'ANN_ES→French');
-      console.log('ANN_ES translated');
+      await sendToChannel(ANN_EN, withBody(header, results[0]), 'ANN_ES→English');
+      await sendToChannel(ANN_DE, withBody(header, results[1]), 'ANN_ES→German');
+      await sendToChannel(ANN_SK, withBody(header, results[2]), 'ANN_ES→Slovak');
+      await sendToChannel(ANN_FR, withBody(header, results[3]), 'ANN_ES→French');
     } catch (err) { console.error('ANN_ES error:', err.message); }
   }
 
@@ -764,11 +814,10 @@ client.on('messageCreate', async (msg) => {
         GEN_SK ? 'sk' : null,
         GEN_FR ? 'fr' : null
       ]);
-      await sendToChannel(GEN_EN, header + '\n' + results[0], 'GEN_ES→English');
-      await sendToChannel(GEN_DE, header + '\n' + results[1], 'GEN_ES→German');
-      await sendToChannel(GEN_SK, header + '\n' + results[2], 'GEN_ES→Slovak');
-      await sendToChannel(GEN_FR, header + '\n' + results[3], 'GEN_ES→French');
-      console.log('GEN_ES translated');
+      await sendToChannel(GEN_EN, withBody(header, results[0]), 'GEN_ES→English');
+      await sendToChannel(GEN_DE, withBody(header, results[1]), 'GEN_ES→German');
+      await sendToChannel(GEN_SK, withBody(header, results[2]), 'GEN_ES→Slovak');
+      await sendToChannel(GEN_FR, withBody(header, results[3]), 'GEN_ES→French');
     } catch (err) { console.error('GEN_ES error:', err.message); }
   }
 });
@@ -794,11 +843,11 @@ client.on('interactionCreate', async (interaction) => {
     const msg = 'City Capture is starting now \uD83E\uDD18\uD83C\uDFFB';
     try {
       const [de, sk, fr, es] = await translateTargets(msg, 'en', ['de', 'sk', 'fr', 'es']);
-      if (ANN_EN) { const ch = await client.channels.fetch(ANN_EN); await ch.send(msg); }
-      if (ANN_DE) { const ch = await client.channels.fetch(ANN_DE); await ch.send(de); }
-      if (ANN_SK) { const ch = await client.channels.fetch(ANN_SK); await ch.send(sk); }
-      if (ANN_FR) { const ch = await client.channels.fetch(ANN_FR); await ch.send(fr); }
-      if (ANN_ES) { const ch = await client.channels.fetch(ANN_ES); await ch.send(es); }
+      await sendToChannel(ANN_EN, msg || UNAVAILABLE_NOTE, 'ANN_EN');
+      await sendToChannel(ANN_DE, de || UNAVAILABLE_NOTE, 'ANN_DE');
+      await sendToChannel(ANN_SK, sk || UNAVAILABLE_NOTE, 'ANN_SK');
+      await sendToChannel(ANN_FR, fr || UNAVAILABLE_NOTE, 'ANN_FR');
+      await sendToChannel(ANN_ES, es || UNAVAILABLE_NOTE, 'ANN_ES');
       await interaction.editReply('City Capture announcement sent to all channels!');
     } catch (err) {
       await interaction.editReply('Failed to send announcement: ' + err.message);
@@ -811,11 +860,11 @@ client.on('interactionCreate', async (interaction) => {
     const msg = 'Zombie raid has started \uD83E\uDDDF';
     try {
       const [de, sk, fr, es] = await translateTargets(msg, 'en', ['de', 'sk', 'fr', 'es']);
-      if (ANN_EN) { const ch = await client.channels.fetch(ANN_EN); await ch.send(msg); }
-      if (ANN_DE) { const ch = await client.channels.fetch(ANN_DE); await ch.send(de); }
-      if (ANN_SK) { const ch = await client.channels.fetch(ANN_SK); await ch.send(sk); }
-      if (ANN_FR) { const ch = await client.channels.fetch(ANN_FR); await ch.send(fr); }
-      if (ANN_ES) { const ch = await client.channels.fetch(ANN_ES); await ch.send(es); }
+      await sendToChannel(ANN_EN, msg || UNAVAILABLE_NOTE, 'ANN_EN');
+      await sendToChannel(ANN_DE, de || UNAVAILABLE_NOTE, 'ANN_DE');
+      await sendToChannel(ANN_SK, sk || UNAVAILABLE_NOTE, 'ANN_SK');
+      await sendToChannel(ANN_FR, fr || UNAVAILABLE_NOTE, 'ANN_FR');
+      await sendToChannel(ANN_ES, es || UNAVAILABLE_NOTE, 'ANN_ES');
       await interaction.editReply('Zombie Raid announcement sent to all channels!');
     } catch (err) {
       await interaction.editReply('Failed to send announcement: ' + err.message);
@@ -825,7 +874,7 @@ client.on('interactionCreate', async (interaction) => {
     const text = interaction.options.getString('text', true);
     try {
       const [de, es] = await translateTargets(text, 'en', ['de', 'es']);
-      await interaction.editReply('**Original:** ' + text + '\n\uD83C\uDDE9\uD83C\uDDEA **German:** ' + de + '\n\uD83C\uDDEA\uD83C\uDDF8 **Spanish:** ' + es);
+      await interaction.editReply('**Original:** ' + text + '\n\uD83C\uDDE9\uD83C\uDDEA **German:** ' + (de || UNAVAILABLE_NOTE) + '\n\uD83C\uDDEA\uD83C\uDDF8 **Spanish:** ' + (es || UNAVAILABLE_NOTE));
     } catch (err) {
       await interaction.editReply('Translation failed. Please try again.');
     }
