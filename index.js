@@ -1,4 +1,4 @@
-import { Client, GatewayIntentBits, REST, Routes, SlashCommandBuilder } from 'discord.js';
+import { AttachmentBuilder, Client, GatewayIntentBits, REST, Routes, SlashCommandBuilder } from 'discord.js';
 import cron from 'node-cron';
 
 const TOKEN = process.env.DISCORD_BOT_TOKEN;
@@ -287,21 +287,89 @@ function translateTargets(text, sourceLang, targetLangs) {
   });
 }
 
-// Header plus translation; a missing translation becomes a short note, never an empty body.
-function withBody(header, body) {
-  return header + '\n' + (body || UNAVAILABLE_NOTE);
+// ---- Image forwarding ----------------------------------------------------
+const MAX_FORWARD_BYTES = 10 * 1024 * 1024;
+const MEDIA_TIMEOUT_MS = 15000;
+const IMAGE_NOT_FORWARDED_NOTE = '_(image could not be forwarded)_';
+const IMAGE_EXT_RE = /\.(png|jpe?g|gif|webp)$/i;
+
+// Downloads each image attachment once. Never throws: failures are logged and counted.
+async function downloadImages(msg) {
+  const out = { files: [], failed: 0 };
+  for (const att of msg.attachments.values()) {
+    const name = att.name ?? 'image';
+    const isImage = att.contentType
+      ? att.contentType.startsWith('image/')
+      : IMAGE_EXT_RE.test(name);
+    if (!isImage) continue;
+    if (att.size > MAX_FORWARD_BYTES) {
+      console.warn('Skipping image ' + name + ': ' + att.size + ' bytes exceeds limit');
+      out.failed++;
+      continue;
+    }
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), MEDIA_TIMEOUT_MS);
+    try {
+      const res = await fetch(att.url, { signal: controller.signal });
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+      const buffer = Buffer.from(await res.arrayBuffer());
+      if (buffer.length > MAX_FORWARD_BYTES) throw new Error('downloaded size exceeds limit');
+      out.files.push({ buffer, name, description: att.description ?? null });
+    } catch (err) {
+      const reason = err?.name === 'AbortError' ? 'timed out' : (err?.message || String(err));
+      console.error('Image download failed for ' + name + ': ' + reason);
+      out.failed++;
+    } finally {
+      clearTimeout(timeout);
+    }
+  }
+  return out;
 }
 
-async function sendToChannel(channelId, content, label) {
+// Fresh discord.js attachment objects for every send (never reuse builders).
+function toAttachments(files) {
+  return files.map(f => {
+    const a = new AttachmentBuilder(f.buffer, { name: f.name });
+    if (f.description) a.setDescription(f.description);
+    return a;
+  });
+}
+
+// Header plus translation; a missing translation becomes a short note, never an empty body.
+// Image-only messages (no text) post the header alone, with the image attached.
+function withBody(header, body, media = null, hasText = true) {
+  const files = media?.files ?? [];
+  const failed = media?.failed ?? 0;
+  const note = failed > 0 ? '\n' + IMAGE_NOT_FORWARDED_NOTE : '';
+  if (!hasText && (files.length > 0 || failed > 0)) return header + note;
+  return header + '\n' + (body || UNAVAILABLE_NOTE) + note;
+}
+
+async function sendToChannel(channelId, content, label, files = []) {
   if (!channelId) return false;
-  if (!content || !content.trim()) {
+  if ((!content || !content.trim()) && files.length === 0) {
     console.error('Not posting empty ' + label + ' message');
     return false;
   }
-  const missing = content.includes(UNAVAILABLE_NOTE);
+  const missing = (content || '').includes(UNAVAILABLE_NOTE);
 
   try {
     const channel = await client.channels.fetch(channelId);
+    if (files.length > 0) {
+      try {
+        await channel.send({ content: content || undefined, files: toAttachments(files) });
+        console.log('Posted ' + label + ' with ' + files.length + ' image(s)' + (missing ? ' (translation unavailable)' : ''));
+        return true;
+      } catch (err) {
+        console.error('Image upload failed for ' + label + ':', err instanceof Error ? err.message : err);
+        // Fall back to text only, so the text relay is not lost.
+        if (!(content || '').includes(IMAGE_NOT_FORWARDED_NOTE)) {
+          content = content && content.trim()
+            ? content + '\n' + IMAGE_NOT_FORWARDED_NOTE
+            : IMAGE_NOT_FORWARDED_NOTE;
+        }
+      }
+    }
     await channel.send(content);
     console.log('Posted ' + label + (missing ? ' (translation unavailable)' : ''));
     return true;
@@ -577,19 +645,25 @@ client.once('ready', async (c) => {
 client.on('messageCreate', async (msg) => {
   if (msg.author.bot || msg.author.id === botUserId) return;
 
+  // Download each message's images at most once, and only for routes that relay it.
+  let mediaPromise = null;
+  const getMedia = () => (mediaPromise ??= downloadImages(msg));
+  const hasText = (msg.content || '').trim() !== '';
+
   // Dedicated 4-way group: EN → DE, ES, SK
   if (CROSS_EN && msg.channelId === CROSS_EN) {
     const author = msg.member?.displayName || msg.author.username;
     const header = '🇬🇧 **' + author + '** (English):';
     try {
+      const media = await getMedia();
       const [de, es, sk] = await translateTargets(msg.content, 'en', [
         CROSS_DE ? 'de' : null,
         CROSS_ES ? 'es' : null,
         CROSS_SK ? 'sk' : null
       ]);
-      await sendToChannel(CROSS_DE, withBody(header, de), 'CROSS English→German');
-      await sendToChannel(CROSS_ES, withBody(header, es), 'CROSS English→Spanish');
-      await sendToChannel(CROSS_SK, withBody(header, sk), 'CROSS English→Slovak');
+      await sendToChannel(CROSS_DE, withBody(header, de, media, hasText), 'CROSS English→German', media.files);
+      await sendToChannel(CROSS_ES, withBody(header, es, media, hasText), 'CROSS English→Spanish', media.files);
+      await sendToChannel(CROSS_SK, withBody(header, sk, media, hasText), 'CROSS English→Slovak', media.files);
     } catch (err) { console.error('CROSS English error:', err.message); }
   }
 
@@ -598,14 +672,15 @@ client.on('messageCreate', async (msg) => {
     const author = msg.member?.displayName || msg.author.username;
     const header = '🇩🇪 **' + author + '** (German):';
     try {
+      const media = await getMedia();
       const [en, es, sk] = await translateTargets(msg.content, 'de', [
         CROSS_EN ? 'en' : null,
         CROSS_ES ? 'es' : null,
         CROSS_SK ? 'sk' : null
       ]);
-      await sendToChannel(CROSS_EN, withBody(header, en), 'CROSS German→English');
-      await sendToChannel(CROSS_ES, withBody(header, es), 'CROSS German→Spanish');
-      await sendToChannel(CROSS_SK, withBody(header, sk), 'CROSS German→Slovak');
+      await sendToChannel(CROSS_EN, withBody(header, en, media, hasText), 'CROSS German→English', media.files);
+      await sendToChannel(CROSS_ES, withBody(header, es, media, hasText), 'CROSS German→Spanish', media.files);
+      await sendToChannel(CROSS_SK, withBody(header, sk, media, hasText), 'CROSS German→Slovak', media.files);
     } catch (err) { console.error('CROSS German error:', err.message); }
   }
 
@@ -614,14 +689,15 @@ client.on('messageCreate', async (msg) => {
     const author = msg.member?.displayName || msg.author.username;
     const header = '🇪🇸 **' + author + '** (Spanish):';
     try {
+      const media = await getMedia();
       const [en, de, sk] = await translateTargets(msg.content, 'es', [
         CROSS_EN ? 'en' : null,
         CROSS_DE ? 'de' : null,
         CROSS_SK ? 'sk' : null
       ]);
-      await sendToChannel(CROSS_EN, withBody(header, en), 'CROSS Spanish→English');
-      await sendToChannel(CROSS_DE, withBody(header, de), 'CROSS Spanish→German');
-      await sendToChannel(CROSS_SK, withBody(header, sk), 'CROSS Spanish→Slovak');
+      await sendToChannel(CROSS_EN, withBody(header, en, media, hasText), 'CROSS Spanish→English', media.files);
+      await sendToChannel(CROSS_DE, withBody(header, de, media, hasText), 'CROSS Spanish→German', media.files);
+      await sendToChannel(CROSS_SK, withBody(header, sk, media, hasText), 'CROSS Spanish→Slovak', media.files);
     } catch (err) { console.error('CROSS Spanish error:', err.message); }
   }
 
@@ -630,14 +706,15 @@ client.on('messageCreate', async (msg) => {
     const author = msg.member?.displayName || msg.author.username;
     const header = '🇸🇰 **' + author + '** (Slovak):';
     try {
+      const media = await getMedia();
       const [en, de, es] = await translateTargets(msg.content, 'sk', [
         CROSS_EN ? 'en' : null,
         CROSS_DE ? 'de' : null,
         CROSS_ES ? 'es' : null
       ]);
-      await sendToChannel(CROSS_EN, withBody(header, en), 'CROSS Slovak→English');
-      await sendToChannel(CROSS_DE, withBody(header, de), 'CROSS Slovak→German');
-      await sendToChannel(CROSS_ES, withBody(header, es), 'CROSS Slovak→Spanish');
+      await sendToChannel(CROSS_EN, withBody(header, en, media, hasText), 'CROSS Slovak→English', media.files);
+      await sendToChannel(CROSS_DE, withBody(header, de, media, hasText), 'CROSS Slovak→German', media.files);
+      await sendToChannel(CROSS_ES, withBody(header, es, media, hasText), 'CROSS Slovak→Spanish', media.files);
     } catch (err) { console.error('CROSS Slovak error:', err.message); }
   }
 
@@ -648,15 +725,16 @@ client.on('messageCreate', async (msg) => {
     const header = '📢 **' + author + '** (Leadership):';
 
     try {
+      const media = await getMedia();
       const [de, es, sk] = await translateTargets(msg.content, 'en', [
         GERMAN ? 'de' : null,
         SLOVAK ? 'es' : null,
         LEADERSHIP_SK ? 'sk' : null
       ]);
 
-      await sendToChannel(GERMAN, withBody(header, de), 'Leadership→German');
-      await sendToChannel(SLOVAK, withBody(header, es), 'Leadership→Spanish');
-      await sendToChannel(LEADERSHIP_SK, withBody(header, sk), 'Leadership→Slovak');
+      await sendToChannel(GERMAN, withBody(header, de, media, hasText), 'Leadership→German', media.files);
+      await sendToChannel(SLOVAK, withBody(header, es, media, hasText), 'Leadership→Spanish', media.files);
+      await sendToChannel(LEADERSHIP_SK, withBody(header, sk, media, hasText), 'Leadership→Slovak', media.files);
 
     } catch (err) {
       console.error('Translation error:', err.message);
@@ -672,15 +750,16 @@ client.on('messageCreate', async (msg) => {
     const headerSk = '🇩🇪 **' + author + '** (German → Slovak):';
 
     try {
+      const media = await getMedia();
       const [en, es, sk] = await translateTargets(msg.content, 'de', [
         'en',
         SLOVAK ? 'es' : null,
         LEADERSHIP_SK ? 'sk' : null
       ]);
 
-      await sendToChannel(LEADERSHIP, withBody(headerEn, en), 'German→Leadership');
-      await sendToChannel(SLOVAK, withBody(headerEs, es), 'German→Spanish');
-      await sendToChannel(LEADERSHIP_SK, withBody(headerSk, sk), 'German→Slovak');
+      await sendToChannel(LEADERSHIP, withBody(headerEn, en, media, hasText), 'German→Leadership', media.files);
+      await sendToChannel(SLOVAK, withBody(headerEs, es, media, hasText), 'German→Spanish', media.files);
+      await sendToChannel(LEADERSHIP_SK, withBody(headerSk, sk, media, hasText), 'German→Slovak', media.files);
 
     } catch (err) {
       console.error('Translation error:', err.message);
@@ -696,15 +775,16 @@ client.on('messageCreate', async (msg) => {
     const headerSk = '🇪🇸 **' + author + '** (Spanish → Slovak):';
 
     try {
+      const media = await getMedia();
       const [en, de, sk] = await translateTargets(msg.content, 'es', [
         'en',
         GERMAN ? 'de' : null,
         LEADERSHIP_SK ? 'sk' : null
       ]);
 
-      await sendToChannel(LEADERSHIP, withBody(headerEn, en), 'Spanish→Leadership');
-      await sendToChannel(GERMAN, withBody(headerDe, de), 'Spanish→German');
-      await sendToChannel(LEADERSHIP_SK, withBody(headerSk, sk), 'Spanish→Slovak');
+      await sendToChannel(LEADERSHIP, withBody(headerEn, en, media, hasText), 'Spanish→Leadership', media.files);
+      await sendToChannel(GERMAN, withBody(headerDe, de, media, hasText), 'Spanish→German', media.files);
+      await sendToChannel(LEADERSHIP_SK, withBody(headerSk, sk, media, hasText), 'Spanish→Slovak', media.files);
 
     } catch (err) {
       console.error('Translation error:', err.message);
@@ -720,15 +800,16 @@ client.on('messageCreate', async (msg) => {
     const headerEs = '🇸🇰 **' + author + '** (Slovak → Spanish):';
 
     try {
+      const media = await getMedia();
       const [en, de, es] = await translateTargets(msg.content, 'sk', [
         'en',
         GERMAN ? 'de' : null,
         SLOVAK ? 'es' : null
       ]);
 
-      await sendToChannel(LEADERSHIP, withBody(headerEn, en), 'LeadershipSK→Leadership');
-      await sendToChannel(GERMAN, withBody(headerDe, de), 'LeadershipSK→German');
-      await sendToChannel(SLOVAK, withBody(headerEs, es), 'LeadershipSK→Spanish');
+      await sendToChannel(LEADERSHIP, withBody(headerEn, en, media, hasText), 'LeadershipSK→Leadership', media.files);
+      await sendToChannel(GERMAN, withBody(headerDe, de, media, hasText), 'LeadershipSK→German', media.files);
+      await sendToChannel(SLOVAK, withBody(headerEs, es, media, hasText), 'LeadershipSK→Spanish', media.files);
 
     } catch (err) {
       console.error('Translation error:', err.message);
@@ -741,16 +822,17 @@ client.on('messageCreate', async (msg) => {
     const author = msg.member?.displayName || msg.author.username;
     const header = '📢 **' + author + '** (EN):';
     try {
+      const media = await getMedia();
       const results = await translateTargets(msg.content, 'en', [
         ANN_DE ? 'de' : null,
         ANN_SK ? 'sk' : null,
         ANN_FR ? 'fr' : null,
         ANN_ES ? 'es' : null
       ]);
-      await sendToChannel(ANN_DE, withBody(header, results[0]), 'ANN_EN→German');
-      await sendToChannel(ANN_SK, withBody(header, results[1]), 'ANN_EN→Slovak');
-      await sendToChannel(ANN_FR, withBody(header, results[2]), 'ANN_EN→French');
-      await sendToChannel(ANN_ES, withBody(header, results[3]), 'ANN_EN→Spanish');
+      await sendToChannel(ANN_DE, withBody(header, results[0], media, hasText), 'ANN_EN→German', media.files);
+      await sendToChannel(ANN_SK, withBody(header, results[1], media, hasText), 'ANN_EN→Slovak', media.files);
+      await sendToChannel(ANN_FR, withBody(header, results[2], media, hasText), 'ANN_EN→French', media.files);
+      await sendToChannel(ANN_ES, withBody(header, results[3], media, hasText), 'ANN_EN→Spanish', media.files);
     } catch (err) { console.error('ANN_EN error:', err.message); }
   }
 
@@ -759,16 +841,17 @@ client.on('messageCreate', async (msg) => {
     const author = msg.member?.displayName || msg.author.username;
     const header = '🇩🇪 **' + author + '** (DE):';
     try {
+      const media = await getMedia();
       const results = await translateTargets(msg.content, 'de', [
         'en',
         ANN_SK ? 'sk' : null,
         ANN_FR ? 'fr' : null,
         ANN_ES ? 'es' : null
       ]);
-      await sendToChannel(ANN_EN, withBody(header, results[0]), 'ANN_DE→English');
-      await sendToChannel(ANN_SK, withBody(header, results[1]), 'ANN_DE→Slovak');
-      await sendToChannel(ANN_FR, withBody(header, results[2]), 'ANN_DE→French');
-      await sendToChannel(ANN_ES, withBody(header, results[3]), 'ANN_DE→Spanish');
+      await sendToChannel(ANN_EN, withBody(header, results[0], media, hasText), 'ANN_DE→English', media.files);
+      await sendToChannel(ANN_SK, withBody(header, results[1], media, hasText), 'ANN_DE→Slovak', media.files);
+      await sendToChannel(ANN_FR, withBody(header, results[2], media, hasText), 'ANN_DE→French', media.files);
+      await sendToChannel(ANN_ES, withBody(header, results[3], media, hasText), 'ANN_DE→Spanish', media.files);
     } catch (err) { console.error('ANN_DE error:', err.message); }
   }
 
@@ -777,16 +860,17 @@ client.on('messageCreate', async (msg) => {
     const author = msg.member?.displayName || msg.author.username;
     const header = '🇸🇰 **' + author + '** (SK):';
     try {
+      const media = await getMedia();
       const results = await translateTargets(msg.content, 'sk', [
         'en',
         ANN_DE ? 'de' : null,
         ANN_FR ? 'fr' : null,
         ANN_ES ? 'es' : null
       ]);
-      await sendToChannel(ANN_EN, withBody(header, results[0]), 'ANN_SK→English');
-      await sendToChannel(ANN_DE, withBody(header, results[1]), 'ANN_SK→German');
-      await sendToChannel(ANN_FR, withBody(header, results[2]), 'ANN_SK→French');
-      await sendToChannel(ANN_ES, withBody(header, results[3]), 'ANN_SK→Spanish');
+      await sendToChannel(ANN_EN, withBody(header, results[0], media, hasText), 'ANN_SK→English', media.files);
+      await sendToChannel(ANN_DE, withBody(header, results[1], media, hasText), 'ANN_SK→German', media.files);
+      await sendToChannel(ANN_FR, withBody(header, results[2], media, hasText), 'ANN_SK→French', media.files);
+      await sendToChannel(ANN_ES, withBody(header, results[3], media, hasText), 'ANN_SK→Spanish', media.files);
     } catch (err) { console.error('ANN_SK error:', err.message); }
   }
 
@@ -795,16 +879,17 @@ client.on('messageCreate', async (msg) => {
     const author = msg.member?.displayName || msg.author.username;
     const header = '🇫🇷 **' + author + '** (FR):';
     try {
+      const media = await getMedia();
       const results = await translateTargets(msg.content, 'fr', [
         'en',
         ANN_DE ? 'de' : null,
         ANN_SK ? 'sk' : null,
         ANN_ES ? 'es' : null
       ]);
-      await sendToChannel(ANN_EN, withBody(header, results[0]), 'ANN_FR→English');
-      await sendToChannel(ANN_DE, withBody(header, results[1]), 'ANN_FR→German');
-      await sendToChannel(ANN_SK, withBody(header, results[2]), 'ANN_FR→Slovak');
-      await sendToChannel(ANN_ES, withBody(header, results[3]), 'ANN_FR→Spanish');
+      await sendToChannel(ANN_EN, withBody(header, results[0], media, hasText), 'ANN_FR→English', media.files);
+      await sendToChannel(ANN_DE, withBody(header, results[1], media, hasText), 'ANN_FR→German', media.files);
+      await sendToChannel(ANN_SK, withBody(header, results[2], media, hasText), 'ANN_FR→Slovak', media.files);
+      await sendToChannel(ANN_ES, withBody(header, results[3], media, hasText), 'ANN_FR→Spanish', media.files);
     } catch (err) { console.error('ANN_FR error:', err.message); }
   }
 
@@ -814,16 +899,17 @@ client.on('messageCreate', async (msg) => {
     const author = msg.member?.displayName || msg.author.username;
     const header = '📢 **' + author + '** (EN):';
     try {
+      const media = await getMedia();
       const results = await translateTargets(msg.content, 'en', [
         GEN_DE ? 'de' : null,
         GEN_SK ? 'sk' : null,
         GEN_FR ? 'fr' : null,
         GEN_ES ? 'es' : null
       ]);
-      await sendToChannel(GEN_DE, withBody(header, results[0]), 'GEN_EN→German');
-      await sendToChannel(GEN_SK, withBody(header, results[1]), 'GEN_EN→Slovak');
-      await sendToChannel(GEN_FR, withBody(header, results[2]), 'GEN_EN→French');
-      await sendToChannel(GEN_ES, withBody(header, results[3]), 'GEN_EN→Spanish');
+      await sendToChannel(GEN_DE, withBody(header, results[0], media, hasText), 'GEN_EN→German', media.files);
+      await sendToChannel(GEN_SK, withBody(header, results[1], media, hasText), 'GEN_EN→Slovak', media.files);
+      await sendToChannel(GEN_FR, withBody(header, results[2], media, hasText), 'GEN_EN→French', media.files);
+      await sendToChannel(GEN_ES, withBody(header, results[3], media, hasText), 'GEN_EN→Spanish', media.files);
     } catch (err) { console.error('GEN_EN error:', err.message); }
   }
 
@@ -832,16 +918,17 @@ client.on('messageCreate', async (msg) => {
     const author = msg.member?.displayName || msg.author.username;
     const header = '🇩🇪 **' + author + '** (DE):';
     try {
+      const media = await getMedia();
       const results = await translateTargets(msg.content, 'de', [
         'en',
         GEN_SK ? 'sk' : null,
         GEN_FR ? 'fr' : null,
         GEN_ES ? 'es' : null
       ]);
-      await sendToChannel(GEN_EN, withBody(header, results[0]), 'GEN_DE→English');
-      await sendToChannel(GEN_SK, withBody(header, results[1]), 'GEN_DE→Slovak');
-      await sendToChannel(GEN_FR, withBody(header, results[2]), 'GEN_DE→French');
-      await sendToChannel(GEN_ES, withBody(header, results[3]), 'GEN_DE→Spanish');
+      await sendToChannel(GEN_EN, withBody(header, results[0], media, hasText), 'GEN_DE→English', media.files);
+      await sendToChannel(GEN_SK, withBody(header, results[1], media, hasText), 'GEN_DE→Slovak', media.files);
+      await sendToChannel(GEN_FR, withBody(header, results[2], media, hasText), 'GEN_DE→French', media.files);
+      await sendToChannel(GEN_ES, withBody(header, results[3], media, hasText), 'GEN_DE→Spanish', media.files);
     } catch (err) { console.error('GEN_DE error:', err.message); }
   }
 
@@ -850,16 +937,17 @@ client.on('messageCreate', async (msg) => {
     const author = msg.member?.displayName || msg.author.username;
     const header = '🇸🇰 **' + author + '** (SK):';
     try {
+      const media = await getMedia();
       const results = await translateTargets(msg.content, 'sk', [
         'en',
         GEN_DE ? 'de' : null,
         GEN_FR ? 'fr' : null,
         GEN_ES ? 'es' : null
       ]);
-      await sendToChannel(GEN_EN, withBody(header, results[0]), 'GEN_SK→English');
-      await sendToChannel(GEN_DE, withBody(header, results[1]), 'GEN_SK→German');
-      await sendToChannel(GEN_FR, withBody(header, results[2]), 'GEN_SK→French');
-      await sendToChannel(GEN_ES, withBody(header, results[3]), 'GEN_SK→Spanish');
+      await sendToChannel(GEN_EN, withBody(header, results[0], media, hasText), 'GEN_SK→English', media.files);
+      await sendToChannel(GEN_DE, withBody(header, results[1], media, hasText), 'GEN_SK→German', media.files);
+      await sendToChannel(GEN_FR, withBody(header, results[2], media, hasText), 'GEN_SK→French', media.files);
+      await sendToChannel(GEN_ES, withBody(header, results[3], media, hasText), 'GEN_SK→Spanish', media.files);
     } catch (err) { console.error('GEN_SK error:', err.message); }
   }
 
@@ -868,16 +956,17 @@ client.on('messageCreate', async (msg) => {
     const author = msg.member?.displayName || msg.author.username;
     const header = '🇫🇷 **' + author + '** (FR):';
     try {
+      const media = await getMedia();
       const results = await translateTargets(msg.content, 'fr', [
         'en',
         GEN_DE ? 'de' : null,
         GEN_SK ? 'sk' : null,
         GEN_ES ? 'es' : null
       ]);
-      await sendToChannel(GEN_EN, withBody(header, results[0]), 'GEN_FR→English');
-      await sendToChannel(GEN_DE, withBody(header, results[1]), 'GEN_FR→German');
-      await sendToChannel(GEN_SK, withBody(header, results[2]), 'GEN_FR→Slovak');
-      await sendToChannel(GEN_ES, withBody(header, results[3]), 'GEN_FR→Spanish');
+      await sendToChannel(GEN_EN, withBody(header, results[0], media, hasText), 'GEN_FR→English', media.files);
+      await sendToChannel(GEN_DE, withBody(header, results[1], media, hasText), 'GEN_FR→German', media.files);
+      await sendToChannel(GEN_SK, withBody(header, results[2], media, hasText), 'GEN_FR→Slovak', media.files);
+      await sendToChannel(GEN_ES, withBody(header, results[3], media, hasText), 'GEN_FR→Spanish', media.files);
     } catch (err) { console.error('GEN_FR error:', err.message); }
   }
 
@@ -886,16 +975,17 @@ client.on('messageCreate', async (msg) => {
     const author = msg.member?.displayName || msg.author.username;
     const header = '🇪🇸 **' + author + '** (ES):';
     try {
+      const media = await getMedia();
       const results = await translateTargets(msg.content, 'es', [
         'en',
         ANN_DE ? 'de' : null,
         ANN_SK ? 'sk' : null,
         ANN_FR ? 'fr' : null
       ]);
-      await sendToChannel(ANN_EN, withBody(header, results[0]), 'ANN_ES→English');
-      await sendToChannel(ANN_DE, withBody(header, results[1]), 'ANN_ES→German');
-      await sendToChannel(ANN_SK, withBody(header, results[2]), 'ANN_ES→Slovak');
-      await sendToChannel(ANN_FR, withBody(header, results[3]), 'ANN_ES→French');
+      await sendToChannel(ANN_EN, withBody(header, results[0], media, hasText), 'ANN_ES→English', media.files);
+      await sendToChannel(ANN_DE, withBody(header, results[1], media, hasText), 'ANN_ES→German', media.files);
+      await sendToChannel(ANN_SK, withBody(header, results[2], media, hasText), 'ANN_ES→Slovak', media.files);
+      await sendToChannel(ANN_FR, withBody(header, results[3], media, hasText), 'ANN_ES→French', media.files);
     } catch (err) { console.error('ANN_ES error:', err.message); }
   }
 
@@ -904,16 +994,17 @@ client.on('messageCreate', async (msg) => {
     const author = msg.member?.displayName || msg.author.username;
     const header = '🇪🇸 **' + author + '** (ES):';
     try {
+      const media = await getMedia();
       const results = await translateTargets(msg.content, 'es', [
         'en',
         GEN_DE ? 'de' : null,
         GEN_SK ? 'sk' : null,
         GEN_FR ? 'fr' : null
       ]);
-      await sendToChannel(GEN_EN, withBody(header, results[0]), 'GEN_ES→English');
-      await sendToChannel(GEN_DE, withBody(header, results[1]), 'GEN_ES→German');
-      await sendToChannel(GEN_SK, withBody(header, results[2]), 'GEN_ES→Slovak');
-      await sendToChannel(GEN_FR, withBody(header, results[3]), 'GEN_ES→French');
+      await sendToChannel(GEN_EN, withBody(header, results[0], media, hasText), 'GEN_ES→English', media.files);
+      await sendToChannel(GEN_DE, withBody(header, results[1], media, hasText), 'GEN_ES→German', media.files);
+      await sendToChannel(GEN_SK, withBody(header, results[2], media, hasText), 'GEN_ES→Slovak', media.files);
+      await sendToChannel(GEN_FR, withBody(header, results[3], media, hasText), 'GEN_ES→French', media.files);
     } catch (err) { console.error('GEN_ES error:', err.message); }
   }
 });
