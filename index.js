@@ -77,6 +77,47 @@ function detectSourceLanguage(text) {
   return 'en';
 }
 
+// --- placeholder protection start
+// Emoji (unicode and Discord custom/animated), mentions, timestamps and URLs are swapped
+// for ZQX<n>ZQX tokens before the provider call and restored afterwards.
+const PROTECTED_RE = new RegExp([
+  '<a?:\\w{2,32}:\\d+>',                       // custom + animated Discord emoji
+  '<(?:@!?|@&|#)\\d+>',                        // user, role, channel mentions
+  '<t:-?\\d+(?::[a-zA-Z])?>',                  // timestamps
+  '<?https?:\\/\\/[^\\s<>]+>?',                // URLs (optionally <wrapped>)
+  '[0-9#*]\\uFE0F?\\u20E3',                    // keycap emoji
+  '\\p{Regional_Indicator}{2}',                // flag emoji
+  '(?:\\p{Extended_Pictographic}|\\p{Emoji_Presentation})' +
+    '[\\uFE0E\\uFE0F]?\\p{Emoji_Modifier}?' +
+    '(?:\\u200D(?:\\p{Extended_Pictographic}|\\p{Emoji_Presentation})[\\uFE0E\\uFE0F]?\\p{Emoji_Modifier}?)*'
+].join('|'), 'gu');
+const PLACEHOLDER_RE = /ZQX\s*(\d+)\s*ZQX/gi;
+
+function protectTokens(text) {
+  const spans = [];
+  const protectedText = text.replace(PROTECTED_RE, (m) => {
+    spans.push(m);
+    return 'ZQX' + (spans.length - 1) + 'ZQX';
+  });
+  return { protectedText, spans };
+}
+
+// Restores placeholders in order. A placeholder the provider dropped or duplicated is
+// not guessed at; its original token is appended at the end so nothing is lost.
+function restoreTokens(translated, spans) {
+  const seen = new Set();
+  let out = translated.replace(PLACEHOLDER_RE, (m, idx) => {
+    const i = Number(idx);
+    if (i >= spans.length || seen.has(i)) return '';
+    seen.add(i);
+    return spans[i];
+  });
+  const missing = spans.filter((_, i) => !seen.has(i));
+  if (missing.length) out = (out.trim() + ' ' + missing.join(' ')).trim();
+  return { text: out.trim(), missing };
+}
+// --- placeholder protection end
+
 async function translateOnce(text, lang, sourceLang) {
   const params = new URLSearchParams({
     q: text,
@@ -135,9 +176,7 @@ async function translateOnce(text, lang, sourceLang) {
   }
 }
 
-async function translate(text, lang, sourceLang = detectSourceLanguage(text)) {
-  if (sourceLang === lang) return text;
-
+async function translateWithRetry(text, lang, sourceLang) {
   let lastError;
   for (let attempt = 1; attempt <= TRANSLATION_MAX_ATTEMPTS; attempt++) {
     try {
@@ -156,6 +195,19 @@ async function translate(text, lang, sourceLang = detectSourceLanguage(text)) {
     }
   }
   throw lastError;
+}
+
+async function translate(text, lang, sourceLang = detectSourceLanguage(text)) {
+  if (sourceLang === lang) return text;
+
+  const { protectedText, spans } = protectTokens(text);
+  const raw = await translateWithRetry(protectedText, lang, sourceLang);
+  const { text: restored, missing } = restoreTokens(raw, spans);
+  if (missing.length) {
+    console.warn('Translation ' + sourceLang + '→' + lang + ': ' + missing.length +
+      ' emoji/mention token(s) not returned by provider; appended at end');
+  }
+  return restored;
 }
 
 // Global FIFO: every translation request in the bot runs one at a time.
