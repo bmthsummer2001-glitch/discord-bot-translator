@@ -135,9 +135,86 @@ async function translateOnce(text, lang, sourceLang) {
   }
 }
 
-async function translate(text, lang, sourceLang = detectSourceLanguage(text)) {
-  if (sourceLang === lang) return text;
+// ---- Emoji preservation -------------------------------------------------
+// One Unicode emoji (keycaps, flags, skin tones, ZWJ sequences, tag sequences)
+// or one Discord custom emoji (<:name:id>, <a:name:id>).
+const EMOJI_TOKEN_RE = new RegExp(
+  '<a?:\\w{2,32}:\\d{17,20}>' +
+  '|\\p{Regional_Indicator}{2}' +
+  '|(?:[0-9#*]\\uFE0F?\\u20E3|\\p{Extended_Pictographic})(?:\\uFE0F|\\p{Emoji_Modifier}|[\\u{E0020}-\\u{E007F}])*' +
+  '(?:\\u200D(?:\\p{Extended_Pictographic}|[0-9#*]\\uFE0F?\\u20E3)(?:\\uFE0F|\\p{Emoji_Modifier}|[\\u{E0020}-\\u{E007F}])*)*',
+  'gu'
+);
+const EMOJI_PLACEHOLDER = (i) => 'ZXQ' + i;
 
+// Splits a message into: prefix (leading emoji/whitespace, kept verbatim),
+// core (text sent to the provider, inline emoji replaced by placeholders),
+// suffix (trailing emoji/whitespace, kept verbatim), and inline (the emoji list).
+function protectEmoji(text) {
+  const parts = [];
+  let last = 0;
+  for (const m of text.matchAll(EMOJI_TOKEN_RE)) {
+    if (m.index > last) parts.push({ emoji: false, value: text.slice(last, m.index) });
+    parts.push({ emoji: true, value: m[0] });
+    last = m.index + m[0].length;
+  }
+  if (last < text.length) parts.push({ emoji: false, value: text.slice(last) });
+
+  const isText = (p) => !p.emoji && p.value.trim() !== '';
+  const first = parts.findIndex(isText);
+  if (first === -1) return { emojiOnly: true };
+  let end = parts.length - 1;
+  while (!isText(parts[end])) end--;
+
+  const join = (ps) => ps.map(p => p.value).join('');
+  let prefix = join(parts.slice(0, first));
+  let suffix = join(parts.slice(end + 1));
+
+  const core = parts.slice(first, end + 1).map(p => ({ ...p }));
+  const lead = core[0].value.match(/^\s*/)[0];
+  core[0].value = core[0].value.slice(lead.length);
+  prefix += lead;
+  const tail = core[core.length - 1].value.match(/\s*$/)[0];
+  core[core.length - 1].value = core[core.length - 1].value.slice(0, core[core.length - 1].value.length - tail.length);
+  suffix = tail + suffix;
+
+  const inline = [];
+  let coreText = '';
+  for (let i = 0; i < core.length; i++) {
+    const p = core[i];
+    if (p.emoji) {
+      // Pad with spaces only next to letters/digits, so punctuation stays attached.
+      const prevChar = coreText.slice(-1);
+      const nextChar = (core[i + 1]?.value ?? '').charAt(0);
+      if (/[\p{L}\p{N}]/u.test(prevChar)) coreText += ' ';
+      coreText += EMOJI_PLACEHOLDER(inline.length);
+      if (/[\p{L}\p{N}]/u.test(nextChar)) coreText += ' ';
+      inline.push(p.value);
+    } else {
+      coreText += p.value;
+    }
+  }
+  if (inline.length) coreText = coreText.replace(/ {2,}/g, ' ');
+
+  return { emojiOnly: false, prefix, suffix, core: coreText, inline };
+}
+
+// Puts emoji back where their placeholders are. Placeholders must all be present,
+// once each, and in their original order. Otherwise the emoji are kept by prefixing them.
+function restoreEmoji(translated, inline) {
+  const ids = [...translated.matchAll(/ZXQ(\d+)/g)].map(m => Number(m[1]));
+  const intact = ids.length === inline.length && ids.every((id, i) => id === i);
+  if (intact) {
+    return {
+      ok: true,
+      text: translated.replace(/ZXQ(\d+)/g, (_, n) => inline[Number(n)])
+    };
+  }
+  const stripped = translated.replace(/ZXQ\d+/g, ' ').replace(/\s{2,}/g, ' ').trim();
+  return { ok: false, text: inline.join('') + ' ' + stripped };
+}
+
+async function translateWithRetry(text, lang, sourceLang) {
   let lastError;
   for (let attempt = 1; attempt <= TRANSLATION_MAX_ATTEMPTS; attempt++) {
     try {
@@ -157,6 +234,25 @@ async function translate(text, lang, sourceLang = detectSourceLanguage(text)) {
   }
   throw lastError;
 }
+
+async function translate(text, lang, sourceLang = detectSourceLanguage(text)) {
+  if (sourceLang === lang) return text;
+
+  const p = protectEmoji(text);
+  if (p.emojiOnly) return text; // only emoji: nothing to translate, provider not called
+
+  const translatedCore = await translateWithRetry(p.core, lang, sourceLang);
+  let middle = translatedCore;
+  if (p.inline.length) {
+    const r = restoreEmoji(translatedCore, p.inline);
+    if (!r.ok) {
+      console.warn('Emoji placeholders altered for ' + sourceLang + '→' + lang + '; inline emoji moved to the start');
+    }
+    middle = r.text;
+  }
+  return p.prefix + middle + p.suffix;
+}
+
 
 // Global FIFO: every translation request in the bot runs one at a time.
 let translationQueue = Promise.resolve();
