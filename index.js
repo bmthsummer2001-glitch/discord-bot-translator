@@ -180,9 +180,15 @@ function protectEmoji(text) {
 
   const inline = [];
   let coreText = '';
-  for (const p of core) {
+  for (let i = 0; i < core.length; i++) {
+    const p = core[i];
     if (p.emoji) {
-      coreText += ' ' + EMOJI_PLACEHOLDER(inline.length) + ' ';
+      // Pad with spaces only next to letters/digits, so punctuation stays attached.
+      const prevChar = coreText.slice(-1);
+      const nextChar = (core[i + 1]?.value ?? '').charAt(0);
+      if (/[\p{L}\p{N}]/u.test(prevChar)) coreText += ' ';
+      coreText += EMOJI_PLACEHOLDER(inline.length);
+      if (/[\p{L}\p{N}]/u.test(nextChar)) coreText += ' ';
       inline.push(p.value);
     } else {
       coreText += p.value;
