@@ -1,5 +1,6 @@
-import { Client, GatewayIntentBits, REST, Routes, SlashCommandBuilder } from 'discord.js';
+import { Client, GatewayIntentBits, REST, Routes, SlashCommandBuilder, AttachmentBuilder } from 'discord.js';
 import cron from 'node-cron';
+import { AsyncLocalStorage } from 'node:async_hooks';
 
 const TOKEN = process.env.DISCORD_BOT_TOKEN;
 const LEADERSHIP = process.env.LEADERSHIP_CHANNEL_ID;
@@ -33,7 +34,17 @@ if (!TOKEN) {
   process.exit(1);
 }
 
+// Every channel the bot relays messages between (used to decide when to download attachments).
+const RELAY_CHANNEL_IDS = new Set([
+  LEADERSHIP, GERMAN, SLOVAK, LEADERSHIP_SK,
+  ANN_EN, ANN_DE, ANN_SK, ANN_FR, ANN_ES,
+  GEN_EN, GEN_DE, GEN_SK, GEN_FR, GEN_ES,
+  CROSS_EN, CROSS_DE, CROSS_ES, CROSS_SK
+].filter(Boolean));
+
 const MYMEMORY_TRANSLATE_URL = 'https://api.mymemory.translated.net/get';
+// Optional: a contact email raises MyMemory's free limit from ~5,000 to ~50,000 characters/day.
+const MYMEMORY_EMAIL = process.env.MYMEMORY_EMAIL;
 const TRANSLATION_TIMEOUT_MS = 15000;
 const TRANSLATION_MAX_ATTEMPTS = 4;
 const TRANSLATION_BASE_DELAY_MS = 1000;
@@ -41,6 +52,15 @@ const TRANSLATION_MAX_BACKOFF_MS = 30000;
 const TRANSLATION_MAX_RETRY_AFTER_MS = 60000;
 const TRANSLATION_GAP_MS = 500; // pause between consecutive provider requests
 const UNAVAILABLE_NOTE = '_(translation unavailable)_';
+
+// ---- Image / attachment forwarding settings ------------------------------
+const MAX_FORWARD_FILE_BYTES = 25 * 1024 * 1024; // skip anything bigger than this
+const MAX_FORWARD_FILES = 10; // Discord allows at most 10 files per message
+const ATTACHMENT_DOWNLOAD_TIMEOUT_MS = 30000;
+const IMAGE_FAILED_NOTE = '_(image could not be forwarded)_';
+
+// Carries the current message's attachments to sendToChannel without changing every call.
+const relayStore = new AsyncLocalStorage();
 
 class TranslationError extends Error {
   constructor(message, { retryable, retryAfterMs = null } = {}) {
@@ -83,6 +103,7 @@ async function translateOnce(text, lang, sourceLang) {
     langpair: sourceLang + '|' + lang,
     mt: '1'
   });
+  if (MYMEMORY_EMAIL) params.set('de', MYMEMORY_EMAIL);
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), TRANSLATION_TIMEOUT_MS);
 
@@ -119,8 +140,14 @@ async function translateOnce(text, lang, sourceLang) {
     if (Number(data?.responseStatus) === 429) {
       throw new TranslationError('Translation provider rate limited (responseStatus 429)', { retryable: true });
     }
+    if (Number(data?.responseStatus) === 403) {
+      throw new TranslationError(
+        'Translation provider rejected the request (403): ' + String(data?.responseDetails ?? '').slice(0, 120),
+        { retryable: false }
+      );
+    }
     const translated = typeof data?.responseData?.translatedText === 'string'
-      ? data.responseData.translatedText.trim()
+      ? decodeEntities(data.responseData.translatedText).trim()
       : '';
     if (Number(data?.responseStatus) !== 200 || !translated) {
       throw new TranslationError('Empty or invalid translation response', { retryable: true });
@@ -214,6 +241,98 @@ function restoreEmoji(translated, inline) {
   return { ok: false, text: inline.join('') + ' ' + stripped };
 }
 
+// ---- Provider text handling ----------------------------------------------
+const MAX_PROVIDER_BYTES = 450; // MyMemory rejects queries over 500 bytes
+const byteLen = (s) => Buffer.byteLength(s, 'utf8');
+
+// MyMemory sometimes returns HTML entities (&#39; &quot; ...). Turn them back into characters.
+function decodeEntities(text) {
+  return text
+    .replace(/&#x([0-9a-f]+);/gi, (m, h) => { try { return String.fromCodePoint(parseInt(h, 16)); } catch { return m; } })
+    .replace(/&#(\d+);/g, (m, d) => { try { return String.fromCodePoint(Number(d)); } catch { return m; } })
+    .replace(/&quot;/g, '"')
+    .replace(/&apos;/g, "'")
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&amp;/g, '&');
+}
+
+// Splits long text into pieces under the provider's size limit, at line breaks,
+// then sentence ends, then spaces. Whitespace is kept so the pieces join back exactly.
+function splitForProvider(text, maxBytes = MAX_PROVIDER_BYTES) {
+  if (byteLen(text) <= maxBytes) return [text];
+  const pieces = [];
+  for (const part of text.split(/(\n+|(?<=[.!?…])\s+)/)) {
+    if (part === '') continue;
+    if (byteLen(part) <= maxBytes) { pieces.push(part); continue; }
+    for (const word of part.split(/(\s+)/)) {
+      if (word === '') continue;
+      if (byteLen(word) <= maxBytes) { pieces.push(word); continue; }
+      let buf = '';
+      for (const ch of word) {
+        if (byteLen(buf + ch) > maxBytes) { pieces.push(buf); buf = ''; }
+        buf += ch;
+      }
+      if (buf) pieces.push(buf);
+    }
+  }
+  const chunks = [];
+  let cur = '';
+  for (const piece of pieces) {
+    if (cur && byteLen(cur + piece) > maxBytes) { chunks.push(cur); cur = ''; }
+    cur += piece;
+  }
+  if (cur) chunks.push(cur);
+  return chunks;
+}
+
+// ---- Source-language check ------------------------------------------------
+// The channel decides the assumed source language, but people often write in another
+// language (for example Spanish in the English channel). This only overrides the
+// assumed language when the text clearly looks like a different supported language.
+const LANG_WORDS = {
+  en: 'the and you are this that with have not but what just was they there will would your from about how when been got',
+  es: 'el los las una es por con para se su al lo como más pero sus ya muy sin sobre también hasta hay donde desde todo nos todos les ni ese eso estoy gracias hola está están tengo tiene quiero puedo bien porque cuando ahora aquí así vamos buenos buenas días',
+  fr: 'le les des une est pour avec pas sur qui dans nous vous ils elles mais sont être très merci bonjour je il ne ce aussi comme fait',
+  de: 'der die das und nicht ich ist für mit ein eine auf auch sich von zu dem wir sie aber wie noch nur wenn oder danke bitte ja nein hallo gut',
+  sk: 'nie som že pre ako ale mám máš máte ďakujem prosím áno tak už len tu tam sme sú bol bola ahoj'
+};
+const LANG_WORD_SETS = Object.fromEntries(
+  Object.entries(LANG_WORDS).map(([lang, words]) => [lang, new Set(words.split(' '))])
+);
+const LANG_CHAR_HINTS = [
+  ['es', /[ñ¿¡]/gu],
+  ['de', /ß/gu],
+  ['sk', /[ľĺŕôďťň]/gu],
+  ['fr', /[çœêâîûèùà]/gu]
+];
+
+function languageScores(text) {
+  const lower = text.toLowerCase();
+  const words = lower.match(/\p{L}+/gu) ?? [];
+  const scores = { en: 0, es: 0, fr: 0, de: 0, sk: 0 };
+  for (const w of words) {
+    for (const lang of Object.keys(scores)) {
+      if (LANG_WORD_SETS[lang].has(w)) scores[lang]++;
+    }
+  }
+  for (const [lang, re] of LANG_CHAR_HINTS) {
+    scores[lang] += (lower.match(re) ?? []).length * (lang === 'fr' ? 1 : 2);
+  }
+  return { scores, wordCount: words.length };
+}
+
+function correctSourceLanguage(text, assumed) {
+  const { scores, wordCount } = languageScores(text);
+  if (wordCount < 3 || !(assumed in scores)) return assumed;
+  const ranked = Object.entries(scores).sort((a, b) => b[1] - a[1]);
+  const [bestLang, bestScore] = ranked[0];
+  if (bestLang === assumed) return assumed;
+  const runnerUp = ranked.find(([lang]) => lang !== bestLang)[1];
+  const clear = bestScore >= 2 && bestScore - scores[assumed] >= 2 && bestScore > runnerUp;
+  return clear ? bestLang : assumed;
+}
+
 async function translateWithRetry(text, lang, sourceLang) {
   let lastError;
   for (let attempt = 1; attempt <= TRANSLATION_MAX_ATTEMPTS; attempt++) {
@@ -241,7 +360,28 @@ async function translate(text, lang, sourceLang = detectSourceLanguage(text)) {
   const p = protectEmoji(text);
   if (p.emojiOnly) return text; // only emoji: nothing to translate, provider not called
 
-  const translatedCore = await translateWithRetry(p.core, lang, sourceLang);
+  // If the text is clearly in another language than the channel assumes, use the real one.
+  const actualLang = correctSourceLanguage(p.core, sourceLang);
+  if (actualLang !== sourceLang) {
+    console.warn('Source language looks like ' + actualLang + ', not ' + sourceLang + '; using ' + actualLang);
+    sourceLang = actualLang;
+    if (sourceLang === lang) return text; // already in the target language
+  }
+
+  // Long messages are sent in pieces (the provider rejects queries over 500 bytes).
+  const chunks = splitForProvider(p.core);
+  const translatedParts = [];
+  for (let i = 0; i < chunks.length; i++) {
+    const [, lead, body, trail] = chunks[i].match(/^(\s*)([\s\S]*?)(\s*)$/);
+    if (!body) {
+      translatedParts.push(chunks[i]);
+      continue;
+    }
+    if (i > 0) await sleep(TRANSLATION_GAP_MS);
+    translatedParts.push(lead + await translateWithRetry(body, lang, sourceLang) + trail);
+  }
+  const translatedCore = translatedParts.join('');
+
   let middle = translatedCore;
   if (p.inline.length) {
     const r = restoreEmoji(translatedCore, p.inline);
@@ -288,22 +428,47 @@ function translateTargets(text, sourceLang, targetLangs) {
 }
 
 // Header plus translation; a missing translation becomes a short note, never an empty body.
+// Image-only messages (no text) get just the header, and the image is attached by sendToChannel.
 function withBody(header, body) {
+  if (relayStore.getStore()?.imageOnly) return header;
   return header + '\n' + (body || UNAVAILABLE_NOTE);
 }
 
+// Sends a message. If the message being relayed had attachments, they are attached too.
+// If the files cannot be sent, the text is still posted with a short note.
 async function sendToChannel(channelId, content, label) {
   if (!channelId) return false;
   if (!content || !content.trim()) {
     console.error('Not posting empty ' + label + ' message');
     return false;
   }
+  const store = relayStore.getStore();
+  const files = store?.files ?? [];
+  let note = store?.failedCount ? IMAGE_FAILED_NOTE : '';
   const missing = content.includes(UNAVAILABLE_NOTE);
 
   try {
     const channel = await client.channels.fetch(channelId);
-    await channel.send(content);
-    console.log('Posted ' + label + (missing ? ' (translation unavailable)' : ''));
+
+    if (files.length) {
+      try {
+        await channel.send({
+          content: note ? content + '\n' + note : content,
+          files: files.map(f => new AttachmentBuilder(f.buffer, { name: f.name, description: f.description }))
+        });
+        console.log('Posted ' + label + ' with ' + files.length + ' file(s)' + (missing ? ' (translation unavailable)' : ''));
+        return true;
+      } catch (err) {
+        console.error(
+          'Could not forward file(s) to ' + label + ': ' +
+          (err instanceof Error ? err.message : err)
+        );
+        note = IMAGE_FAILED_NOTE;
+      }
+    }
+
+    await channel.send(note ? content + '\n' + note : content);
+    console.log('Posted ' + label + (missing ? ' (translation unavailable)' : '') + (note ? ' (image not forwarded)' : ''));
     return true;
   } catch (err) {
     console.error(
@@ -312,6 +477,34 @@ async function sendToChannel(channelId, content, label) {
     );
     return false;
   }
+}
+
+// Downloads each attachment once so the same data can be re-uploaded to every target channel.
+async function downloadAttachments(msg) {
+  const files = [];
+  let failedCount = 0;
+  const attachments = [...msg.attachments.values()].slice(0, MAX_FORWARD_FILES);
+
+  for (const att of attachments) {
+    if (att.size > MAX_FORWARD_FILE_BYTES) {
+      console.warn('Skipping attachment ' + att.name + ': too large (' + att.size + ' bytes)');
+      failedCount++;
+      continue;
+    }
+    try {
+      const res = await fetch(att.url, { signal: AbortSignal.timeout(ATTACHMENT_DOWNLOAD_TIMEOUT_MS) });
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+      const buffer = Buffer.from(await res.arrayBuffer());
+      files.push({ buffer, name: att.name, description: att.description ?? undefined });
+    } catch (err) {
+      console.error(
+        'Could not download attachment ' + att.name + ': ' +
+        (err instanceof Error ? err.message : err)
+      );
+      failedCount++;
+    }
+  }
+  return { files, failedCount };
 }
 
 
@@ -574,9 +767,7 @@ client.once('ready', async (c) => {
   console.log('Level 9 bauxite reminder cron job set for 4:30 PM ET on Sundays');
 });
 
-client.on('messageCreate', async (msg) => {
-  if (msg.author.bot || msg.author.id === botUserId) return;
-
+async function relayMessage(msg) {
   // Dedicated 4-way group: EN → DE, ES, SK
   if (CROSS_EN && msg.channelId === CROSS_EN) {
     const author = msg.member?.displayName || msg.author.username;
@@ -915,6 +1106,25 @@ client.on('messageCreate', async (msg) => {
       await sendToChannel(GEN_SK, withBody(header, results[2]), 'GEN_ES→Slovak');
       await sendToChannel(GEN_FR, withBody(header, results[3]), 'GEN_ES→French');
     } catch (err) { console.error('GEN_ES error:', err.message); }
+  }
+}
+
+client.on('messageCreate', async (msg) => {
+  if (msg.author.bot || msg.author.id === botUserId) return;
+
+  try {
+    // Download any attachments once, then relay with them available to every send.
+    let files = [];
+    let failedCount = 0;
+    if (msg.attachments.size > 0 && RELAY_CHANNEL_IDS.has(msg.channelId)) {
+      ({ files, failedCount } = await downloadAttachments(msg));
+    }
+    const hasText = typeof msg.content === 'string' && msg.content.trim() !== '';
+    const imageOnly = !hasText && (files.length > 0 || failedCount > 0);
+
+    await relayStore.run({ files, failedCount, imageOnly }, () => relayMessage(msg));
+  } catch (err) {
+    console.error('Relay error:', err instanceof Error ? err.message : err);
   }
 });
 
