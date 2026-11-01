@@ -29,6 +29,13 @@ const CROSS_DE = process.env.CROSS_DE_CHANNEL_ID;
 const CROSS_ES = process.env.CROSS_ES_CHANNEL_ID;
 const CROSS_SK = process.env.CROSS_SK_CHANNEL_ID;
 
+// Off-topic channel group (EN / DE / FR / ES / SK)
+const OT_EN = process.env.OT_EN_CHANNEL_ID;
+const OT_DE = process.env.OT_DE_CHANNEL_ID;
+const OT_FR = process.env.OT_FR_CHANNEL_ID;
+const OT_ES = process.env.OT_ES_CHANNEL_ID;
+const OT_SK = process.env.OT_SK_CHANNEL_ID;
+
 if (!TOKEN) {
   console.error('Missing DISCORD_BOT_TOKEN');
   process.exit(1);
@@ -39,7 +46,8 @@ const RELAY_CHANNEL_IDS = new Set([
   LEADERSHIP, GERMAN, SLOVAK, LEADERSHIP_SK,
   ANN_EN, ANN_DE, ANN_SK, ANN_FR, ANN_ES,
   GEN_EN, GEN_DE, GEN_SK, GEN_FR, GEN_ES,
-  CROSS_EN, CROSS_DE, CROSS_ES, CROSS_SK
+  CROSS_EN, CROSS_DE, CROSS_ES, CROSS_SK,
+  OT_EN, OT_DE, OT_FR, OT_ES, OT_SK
 ].filter(Boolean));
 
 const MYMEMORY_TRANSLATE_URL = 'https://api.mymemory.translated.net/get';
@@ -72,6 +80,19 @@ class TranslationError extends Error {
 }
 
 const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+
+// Counts characters sent to the translation provider per UTC day, so usage shows up in the logs.
+let charDay = new Date().toISOString().slice(0, 10);
+let charsToday = 0;
+function trackProviderChars(count) {
+  const day = new Date().toISOString().slice(0, 10);
+  if (day !== charDay) {
+    charDay = day;
+    charsToday = 0;
+  }
+  charsToday += count;
+  console.log('Provider characters today (UTC ' + charDay + '): ' + charsToday);
+}
 
 // Retry-After is either delta-seconds or an HTTP-date.
 function parseRetryAfterMs(value) {
@@ -152,6 +173,7 @@ async function translateOnce(text, lang, sourceLang) {
     if (Number(data?.responseStatus) !== 200 || !translated) {
       throw new TranslationError('Empty or invalid translation response', { retryable: true });
     }
+    trackProviderChars(text.length);
     return translated;
   } catch (err) {
     if (err instanceof TranslationError) throw err;
@@ -767,7 +789,32 @@ client.once('ready', async (c) => {
   console.log('Level 9 bauxite reminder cron job set for 4:30 PM ET on Sundays');
 });
 
+// Off-topic group: a message in any of these channels goes to all the others.
+const OT_GROUP = [
+  { id: OT_EN, lang: 'en', flag: '📢', tag: 'EN' },
+  { id: OT_DE, lang: 'de', flag: '🇩🇪', tag: 'DE' },
+  { id: OT_FR, lang: 'fr', flag: '🇫🇷', tag: 'FR' },
+  { id: OT_ES, lang: 'es', flag: '🇪🇸', tag: 'ES' },
+  { id: OT_SK, lang: 'sk', flag: '🇸🇰', tag: 'SK' }
+].filter(c => c.id);
+
+async function relayOffTopic(msg) {
+  const source = OT_GROUP.find(c => c.id === msg.channelId);
+  if (!source) return;
+  const author = msg.member?.displayName || msg.author.username;
+  const header = source.flag + ' **' + author + '** (' + source.tag + '):';
+  const targets = OT_GROUP.filter(c => c !== source);
+  try {
+    const results = await translateTargets(msg.content, source.lang, targets.map(t => t.lang));
+    for (let i = 0; i < targets.length; i++) {
+      await sendToChannel(targets[i].id, withBody(header, results[i]), 'OT_' + source.tag + '→' + targets[i].tag);
+    }
+  } catch (err) { console.error('OT_' + source.tag + ' error:', err.message); }
+}
+
 async function relayMessage(msg) {
+  await relayOffTopic(msg);
+
   // Dedicated 4-way group: EN → DE, ES, SK
   if (CROSS_EN && msg.channelId === CROSS_EN) {
     const author = msg.member?.displayName || msg.author.username;
