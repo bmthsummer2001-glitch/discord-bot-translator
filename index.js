@@ -650,44 +650,6 @@ async function postDailySchedule() {
   }
 }
 
-async function postZombieRaidReminder() {
-  try {
-    const text = '\u2694\uFE0F ZOMBIE RAID REMINDER \u2013 TODAY!\n\nBack-to-Back Zombie Raids:\n\u2022 1st Raid: 18:00 GT\n\u2022 2nd Raid: 21:00 GT\n\nSave stamina and prep squads in advance!\n~ Please keep at least one strong truck home all day';
-    if (DAILY_CHANNEL_ID) { const ch = await client.channels.fetch(DAILY_CHANNEL_ID); await ch.send(TBV_ROLE + '\n' + text); }
-    const langs = await translateTargets(text, 'en', [
-      ANN_DE ? 'de' : null,
-      ANN_SK ? 'sk' : null,
-      ANN_FR ? 'fr' : null,
-      ANN_ES ? 'es' : null
-    ]);
-    await sendToChannel(ANN_DE, langs[0] || UNAVAILABLE_NOTE, 'ANN_DE');
-    await sendToChannel(ANN_SK, langs[1] || UNAVAILABLE_NOTE, 'ANN_SK');
-    await sendToChannel(ANN_FR, langs[2] || UNAVAILABLE_NOTE, 'ANN_FR');
-    await sendToChannel(ANN_ES, langs[3] || UNAVAILABLE_NOTE, 'ANN_ES');
-  } catch (err) {
-    console.error('Failed to post zombie raid reminder:', err.message);
-  }
-}
-
-async function postSecondZombieRaidReminder() {
-  try {
-    const text = '\u2694\uFE0F Second Zombie Raid starts in 30 minutes!\n21:00 GT';
-    if (DAILY_CHANNEL_ID) { const ch = await client.channels.fetch(DAILY_CHANNEL_ID); await ch.send(TBV_ROLE + '\n' + text); }
-    const langs = await translateTargets(text, 'en', [
-      ANN_DE ? 'de' : null,
-      ANN_SK ? 'sk' : null,
-      ANN_FR ? 'fr' : null,
-      ANN_ES ? 'es' : null
-    ]);
-    await sendToChannel(ANN_DE, langs[0] || UNAVAILABLE_NOTE, 'ANN_DE');
-    await sendToChannel(ANN_SK, langs[1] || UNAVAILABLE_NOTE, 'ANN_SK');
-    await sendToChannel(ANN_FR, langs[2] || UNAVAILABLE_NOTE, 'ANN_FR');
-    await sendToChannel(ANN_ES, langs[3] || UNAVAILABLE_NOTE, 'ANN_ES');
-  } catch (err) {
-    console.error('Failed to post second zombie raid reminder:', err.message);
-  }
-}
-
 async function postLevel11Bauxite() {
   try {
     const text = '\u26CF\uFE0F You can now start pre-gathering a level 11 bauxite mine';
@@ -757,19 +719,6 @@ client.once('ready', async (c) => {
     postDailySchedule();
   }, { timezone: 'America/New_York' });
   console.log('Daily schedule cron job set for 10:00 PM ET');
-
-  // Zombie raid reminders are turned off. To bring them back, remove the // at the start of each line below.
-  // cron.schedule('0 12 * * 4', () => {
-  //   console.log('Posting zombie raid reminder...');
-  //   postZombieRaidReminder();
-  // }, { timezone: 'America/New_York' });
-  // console.log('Zombie raid reminder cron job set for 12:00 PM ET on Thursdays');
-  //
-  // cron.schedule('30 18 * * 4', () => {
-  //   console.log('Posting second zombie raid reminder...');
-  //   postSecondZombieRaidReminder();
-  // }, { timezone: 'America/New_York' });
-  // console.log('Second zombie raid reminder cron job set for 6:30 PM ET on Thursdays');
 
   cron.schedule('30 4 * * 0', () => {
     console.log('Posting level 11 bauxite reminder...');
