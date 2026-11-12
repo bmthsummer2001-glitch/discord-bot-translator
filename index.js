@@ -571,13 +571,7 @@ Primary Focus ~ Research new technologies in the Tech Center:
   4: `🔷 THURSDAY – Recruitment day
 Starts at: 00:30 GT
 
-• Hero recruitment
-
-⚔️ ZOMBIE RAID DAY – Back-to-Back Zombie Raids:
-• 1st Raid: 18:00 GT
-• 2nd Raid: 21:00 GT
-
-Save stamina and prep squads in advance.`,
+• Hero recruitment`,
   5: `🔷 FRIDAY – Training day
 Starts at 00:30 GT
 
